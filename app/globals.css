@@ -1,0 +1,196 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Updated colors to match Sharpen Focus brand (Deep Purple #530093, Medium Purple #A21094) */
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.15 0 0);
+  --surface: oklch(0.96 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0 0);
+
+  /* Primary: Deep Purple #530093 */
+  --primary: oklch(0.385 0.193 283.5);
+  --primary-foreground: oklch(0.98 0 0);
+
+  /* Secondary: Medium Purple #A21094 */
+  --secondary: oklch(0.56 0.174 284.2);
+  --secondary-foreground: oklch(0.98 0 0);
+
+  --muted: oklch(0.92 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.385 0.193 283.5);
+  --accent-foreground: oklch(0.98 0 0);
+
+  /* Status colors for tickets */
+  --status-open: oklch(0.53 0.15 259.5);
+  --status-closed: oklch(0.63 0.15 142.4);
+  --status-hold: oklch(0.72 0.15 80);
+  --success: oklch(0.63 0.15 142.4);
+  --danger: oklch(0.58 0.18 25.3);
+  --warning: oklch(0.72 0.15 80);
+
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.92 0 0);
+  --input: oklch(0.96 0 0);
+  --ring: oklch(0.385 0.193 283.5);
+  --chart-1: oklch(0.385 0.193 283.5);
+  --chart-2: oklch(0.56 0.174 284.2);
+  --chart-3: oklch(0.646 0.222 41.116);
+  --chart-4: oklch(0.63 0.15 142.4);
+  --chart-5: oklch(0.72 0.15 80);
+  --radius: 0.625rem;
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.15 0 0);
+  --sidebar-primary: oklch(0.385 0.193 283.5);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.96 0 0);
+  --sidebar-accent-foreground: oklch(0.15 0 0);
+  --sidebar-border: oklch(0.92 0 0);
+  --sidebar-ring: oklch(0.385 0.193 283.5);
+}
+
+.dark {
+  --background: oklch(0.12 0 0);
+  --foreground: oklch(0.95 0 0);
+  --surface: oklch(0.18 0 0);
+  --card: oklch(0.15 0 0);
+  --card-foreground: oklch(0.95 0 0);
+  --popover: oklch(0.15 0 0);
+  --popover-foreground: oklch(0.95 0 0);
+  --primary: oklch(0.65 0.16 283.5);
+  --primary-foreground: oklch(0.12 0 0);
+  --secondary: oklch(0.72 0.14 284.2);
+  --secondary-foreground: oklch(0.12 0 0);
+  --muted: oklch(0.35 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.65 0.16 283.5);
+  --accent-foreground: oklch(0.12 0 0);
+  --status-open: oklch(0.62 0.15 259.5);
+  --status-closed: oklch(0.73 0.14 142.4);
+  --status-hold: oklch(0.8 0.12 80);
+  --success: oklch(0.73 0.14 142.4);
+  --danger: oklch(0.65 0.16 25.3);
+  --warning: oklch(0.8 0.12 80);
+  --destructive: oklch(0.65 0.16 25.3);
+  --destructive-foreground: oklch(0.95 0 0);
+  --border: oklch(0.25 0 0);
+  --input: oklch(0.2 0 0);
+  --ring: oklch(0.65 0.16 283.5);
+  --chart-1: oklch(0.65 0.16 283.5);
+  --chart-2: oklch(0.72 0.14 284.2);
+  --chart-3: oklch(0.73 0.15 41.116);
+  --chart-4: oklch(0.73 0.14 142.4);
+  --chart-5: oklch(0.8 0.12 80);
+  --sidebar: oklch(0.15 0 0);
+  --sidebar-foreground: oklch(0.95 0 0);
+  --sidebar-primary: oklch(0.65 0.16 283.5);
+  --sidebar-primary-foreground: oklch(0.95 0 0);
+  --sidebar-accent: oklch(0.25 0 0);
+  --sidebar-accent-foreground: oklch(0.95 0 0);
+  --sidebar-border: oklch(0.25 0 0);
+  --sidebar-ring: oklch(0.65 0.16 283.5);
+}
+
+@theme inline {
+  --font-sans: var(--font-open-sans), "Open Sans", sans-serif;
+  --font-poppins: var(--font-poppins), "Poppins", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-status-open: var(--status-open);
+  --color-status-closed: var(--status-closed);
+  --color-status-hold: var(--status-hold);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Removed problematic input-field class definition - now using inline Tailwind classes */
+}
+
+@layer utilities {
+  .text-foreground-secondary {
+    @apply text-foreground/70;
+  }
+
+  .bg-primary-light {
+    @apply bg-primary/10;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .card-hover {
+    @apply transition-all duration-200 hover:shadow-md hover:border-primary;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold;
+  }
+
+  .status-open {
+    @apply bg-blue-50 text-blue-700 dark:bg-blue-900 dark:text-blue-200;
+  }
+
+  .status-closed {
+    @apply bg-green-50 text-green-700 dark:bg-green-900 dark:text-green-200;
+  }
+
+  .status-hold {
+    @apply bg-yellow-50 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200;
+  }
+}

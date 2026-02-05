@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="hexGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6"/>
+      <stop offset="50%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#6d28d9"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded hexagon shape -->
+  <path d="M50 5 L88 25 Q95 29 95 37 L95 63 Q95 71 88 75 L50 95 L12 75 Q5 71 5 63 L5 37 Q5 29 12 25 Z" fill="url(#hexGradient)"/>
+  <!-- Funnel/Filter shape (Y-like) -->
+  <path d="M28 28 L72 28 L72 35 L55 52 L55 72 L45 72 L45 52 L28 35 Z" fill="white"/>
+</svg>
