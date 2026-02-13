@@ -27,7 +27,7 @@ export default function TicketsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 bg-card p-4 shadow-lg rounded-md w-full ">
         {showSuccess && (
           <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex gap-3 animate-in fade-in slide-in-from-top">
             <CheckCircle className="w-5 h-5 text-success flex-shrink-0" />

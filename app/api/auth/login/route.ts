@@ -18,6 +18,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ user: result.user }, { status: 200 })
   } catch (error) {
     console.error("Login route error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    const errorMessage = error instanceof Error ? error.message : "Unknown error"
+    console.error("Login route error details:", errorMessage)
+    return NextResponse.json(
+      { 
+        error: "Internal server error",
+        details: process.env.NODE_ENV === "development" ? errorMessage : undefined
+      },
+      { status: 500 }
+    )
   }
 }

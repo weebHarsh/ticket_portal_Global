@@ -11,7 +11,7 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-background">
       <HorizontalNav />
-      <main className="bg-surface p-6 md:p-8">{children}</main>
+      <main className="bg-surface p-6 md:p-4 shadow-md">{children}</main>
     </div>
   )
 }

@@ -101,7 +101,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
   ].filter(Boolean).length
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 bg-card p-4 shadow-lg rounded-md w-full">
       {/* Quick Actions Bar */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         {/* Universal Search */}
@@ -176,7 +176,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
       {/* Expanded Filters */}
       {showFilters && (
         <div className="bg-white border border-border rounded-xl p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-8 gap-4">
             {/* Status */}
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Status</label>
@@ -261,22 +261,26 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
                 ))}
               </select>
             </div>
-          </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 justify-end pt-4 border-t border-border">
-            <button
-              onClick={handleReset}
-              className="px-4 py-2 border border-border rounded-lg text-foreground hover:bg-surface transition-colors text-sm font-medium"
-            >
-              Reset All
-            </button>
-            <button
-              onClick={handleApplyFilters}
-              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-light transition-colors text-sm font-medium"
-            >
-              Apply Filters
-            </button>
+            {/* Reset All Button */}
+            <div className="flex items-end">
+              <button
+                onClick={handleReset}
+                className="w-full px-4 py-2.5 border border-border rounded-lg text-foreground hover:bg-surface transition-colors text-sm font-medium whitespace-nowrap"
+              >
+                Reset All
+              </button>
+            </div>
+
+            {/* Apply Filters Button */}
+            <div className="flex items-end">
+              <button
+                onClick={handleApplyFilters}
+                className="w-full px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary-light transition-colors text-sm font-medium whitespace-nowrap"
+              >
+                Apply Filters
+              </button>
+            </div>
           </div>
         </div>
       )}

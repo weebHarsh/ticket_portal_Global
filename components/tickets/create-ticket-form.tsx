@@ -355,7 +355,8 @@ export default function CreateTicketForm() {
         </div>
       )}
 
-      <div className="bg-white border border-border rounded-xl p-6">
+          {/* Ticket Type Selection */}
+      <div className="bg-white border border-border rounded-xl p-6 shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground mb-4">Ticket Type</h3>
         <div className="flex gap-4">
           {["support", "requirement"].map((type) => (
@@ -376,7 +377,8 @@ export default function CreateTicketForm() {
         </div>
       </div>
 
-      <div className="bg-white border border-border rounded-xl p-6 space-y-4">
+      {/* Ticket Classification */}
+      <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground">Ticket Classification</h3>
 
         <div>
@@ -497,7 +499,8 @@ export default function CreateTicketForm() {
         )}
       </div>
 
-      <div className="bg-white border border-border rounded-xl p-6 space-y-4">
+      {/* Assignment & Details */}
+      <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground">Assignment & Details</h3>
 
         <div>
@@ -566,6 +569,7 @@ export default function CreateTicketForm() {
         </div>
       </div>
 
+      {/* Submit Button & Cancel Button */}
       <div className="flex gap-3 justify-end">
         <button
           type="button"

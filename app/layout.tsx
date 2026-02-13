@@ -55,7 +55,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${poppins.variable} ${openSans.variable}`}>
-      <body className={`font-sans antialiased bg-background text-foreground`}>
+      <body 
+        className={`font-sans antialiased bg-background text-foreground`}
+        suppressHydrationWarning
+      >
         <ErrorBoundary>{children}</ErrorBoundary>
         <Analytics />
       </body>

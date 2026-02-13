@@ -4,7 +4,11 @@ import { neon } from "@neondatabase/serverless"
 import bcrypt from "bcryptjs"
 import { cookies } from "next/headers"
 
-const sql = neon(process.env.DATABASE_URL!)
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is not set")
+}
+
+const sql = neon(process.env.DATABASE_URL)
 
 // OWASP: Email validation regex
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
@@ -164,6 +168,8 @@ export async function loginUser(email: string, password: string) {
     }
   } catch (error) {
     console.error("[v0] Login error:", error)
-    return { success: false, error: "Failed to login" }
+    const errorMessage = error instanceof Error ? error.message : "Unknown error"
+    console.error("[v0] Login error details:", errorMessage)
+    return { success: false, error: `Failed to login: ${errorMessage}` }
   }
 }
