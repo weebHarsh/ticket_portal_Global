@@ -1,8 +1,11 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
+import { signOut } from "next-auth/react"
 import { TicketIcon, BarChart3, Settings, Users, LogOut, X, Home, Plus, Database, UserCog } from "lucide-react"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface SidebarProps {
   isOpen: boolean
@@ -24,8 +27,15 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { href: "/admin", label: "Admin", icon: Settings },
   ]
 
-  const handleLogout = () => {
-    // Clear localStorage
+  const handleLogout = async () => {
+    try {
+      // Sign out from NextAuth (for SSO users)
+      await signOut({ redirect: false, callbackUrl: "/login" })
+    } catch (error) {
+      console.error("NextAuth signOut error:", error)
+    }
+
+    // Clear localStorage (for email/password users)
     localStorage.removeItem("user")
     localStorage.removeItem("isLoggedIn")
 
@@ -84,8 +94,12 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             ))}
           </nav>
 
-          {/* Logout */}
-          <div className="p-4 border-t border-border">
+          {/* Theme Toggle and Logout */}
+          <div className="p-4 border-t border-border space-y-2">
+            <div className="flex items-center justify-between px-4 py-2">
+              <span className="text-sm font-medium text-foreground">Theme</span>
+              <ThemeToggle />
+            </div>
             <button
               onClick={handleLogout}
               className="w-full flex items-center gap-3 px-4 py-3 text-foreground hover:bg-surface rounded-lg transition-all"
@@ -93,6 +107,19 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
               <LogOut className="w-5 h-5" />
               <span className="text-sm font-medium">Logout</span>
             </button>
+          </div>
+
+          {/* Company Logo Footer */}
+          <div className="p-4 border-t border-border">
+            <div className="flex items-center justify-center">
+              <Image
+                src="/company-logo.svg"
+                alt="Company Logo"
+                width={120}
+                height={40}
+                className="h-8 w-auto opacity-70 hover:opacity-100 transition-opacity"
+              />
+            </div>
           </div>
         </div>
       </div>

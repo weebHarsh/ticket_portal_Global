@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
+import { useSession } from "next-auth/react"
 import DashboardLayout from "@/components/layout/dashboard-layout"
 import { Settings, Plus, Trash2, Users, Eye, EyeOff, Check, UserPlus } from "lucide-react"
 import { getBusinessUnitGroups } from "@/lib/actions/master-data"
@@ -22,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import AddTeamMemberModal from "@/components/settings/add-team-member-modal"
 
 export default function SettingsPage() {
+  const { data: session, status, update } = useSession()
   const [activeTab, setActiveTab] = useState("my-group")
   const [businessGroups, setBusinessGroups] = useState<any[]>([])
   const [allUsers, setAllUsers] = useState<any[]>([])
@@ -43,39 +45,60 @@ export default function SettingsPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [showAddMemberModal, setShowAddMemberModal] = useState(false)
 
+  // Load business groups once on mount
   useEffect(() => {
-    loadData()
+    const loadBusinessGroups = async () => {
+      try {
+        const buResult = await getBusinessUnitGroups()
+        if (buResult.success) {
+          setBusinessGroups(buResult.data || [])
+        }
+      } catch (error) {
+        console.error("Failed to load business groups:", error)
+      }
+    }
+    loadBusinessGroups()
   }, [])
+
+  // Load initial user data and update when session changes
+  useEffect(() => {
+    if (status === "authenticated" && session?.user) {
+      const userFromSession = {
+        id: parseInt(session.user.id || "0"),
+        email: session.user.email || "",
+        full_name: session.user.name || "",
+        role: session.user.role || "user",
+        business_unit_group_id: session.user.business_unit_group_id || null,
+        group_name: session.user.group_name || "",
+        auth_provider: session.user.auth_provider || "email",
+      }
+      setCurrentUser(userFromSession)
+      setFullName(userFromSession.full_name || "")
+      setSelectedBusinessGroup(userFromSession.business_unit_group_id?.toString() || "")
+      localStorage.setItem("user", JSON.stringify(userFromSession))
+      setLoading(false)
+    } else if (status === "unauthenticated") {
+      // Fallback to localStorage for email/password users
+      const userData = localStorage.getItem("user")
+      if (userData) {
+        try {
+          const user = JSON.parse(userData)
+          setCurrentUser(user)
+          setFullName(user.full_name || "")
+          setSelectedBusinessGroup(user.business_unit_group_id || "")
+        } catch (error) {
+          console.error("Failed to parse user data:", error)
+        }
+      }
+      setLoading(false)
+    }
+  }, [status, session])
 
   useEffect(() => {
     if (activeTab === "my-team" && currentUser?.id) {
       loadTeamMembers()
     }
   }, [activeTab, currentUser])
-
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      const userData = localStorage.getItem("user")
-      if (userData) {
-        const user = JSON.parse(userData)
-        setCurrentUser(user)
-        setFullName(user.full_name || "")
-        setSelectedBusinessGroup(user.business_unit_group_id || "")
-      }
-
-      const [buResult] = await Promise.all([
-        getBusinessUnitGroups(),
-      ])
-
-      if (buResult.success) {
-        setBusinessGroups(buResult.data || [])
-      }
-    } catch (error) {
-      console.error("Failed to load data:", error)
-    }
-    setLoading(false)
-  }
 
   const loadTeamMembers = async () => {
     if (!currentUser?.id) return
@@ -143,6 +166,12 @@ export default function SettingsPage() {
         }
         localStorage.setItem("user", JSON.stringify(updatedUser))
         setCurrentUser(updatedUser)
+        
+        // Refresh NextAuth session to sync changes
+        if (status === "authenticated") {
+          update().catch(console.error)
+        }
+        
         alert("Business group updated successfully!")
       } else {
         alert(result.error || "Failed to update business group")
@@ -180,6 +209,12 @@ export default function SettingsPage() {
         }
         localStorage.setItem("user", JSON.stringify(updatedUser))
         setCurrentUser(updatedUser)
+        
+        // Refresh NextAuth session to sync changes
+        if (status === "authenticated") {
+          update().catch(console.error)
+        }
+        
         alert("Account information updated successfully!")
       } else {
         alert(result.error || "Failed to update account information")

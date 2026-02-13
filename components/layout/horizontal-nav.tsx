@@ -3,6 +3,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
+import { signOut, useSession } from "next-auth/react"
 import { useEffect, useState } from "react"
 import {
   Home,
@@ -15,6 +16,7 @@ import {
   X,
 } from "lucide-react"
 import NotificationsDropdown from "./notifications-dropdown"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface UserData {
   id: number
@@ -28,20 +30,35 @@ interface UserData {
 export default function HorizontalNav() {
   const pathname = usePathname()
   const router = useRouter()
+  const { data: session, status } = useSession()
   const [user, setUser] = useState<UserData | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+  // Load user data from session or localStorage
   useEffect(() => {
     try {
-      const userData = localStorage.getItem("user")
-      if (userData) {
-        setUser(JSON.parse(userData))
+      // Prioritize NextAuth session data (for SSO users)
+      if (status === "authenticated" && session?.user) {
+        setUser({
+          id: parseInt(session.user.id || "0"),
+          email: session.user.email || "",
+          full_name: session.user.name || "",
+          role: session.user.role || "user",
+          business_unit_group_id: session.user.business_unit_group_id || undefined,
+          group_name: session.user.group_name || undefined,
+        })
+      } else {
+        // Fallback to localStorage for email/password users
+        const userData = localStorage.getItem("user")
+        if (userData) {
+          setUser(JSON.parse(userData))
+        }
       }
     } catch (error) {
       console.error("Failed to parse user data:", error)
     }
-  }, [])
+  }, [status, session])
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: Home },
@@ -57,10 +74,22 @@ export default function HorizontalNav() {
     return true
   })
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      // Sign out from NextAuth (for SSO users)
+      await signOut({ redirect: false, callbackUrl: "/login" })
+    } catch (error) {
+      console.error("NextAuth signOut error:", error)
+    }
+
+    // Clear localStorage (for email/password users)
     localStorage.removeItem("user")
     localStorage.removeItem("isLoggedIn")
+
+    // Clear the authentication cookie
     document.cookie = "user=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"
+
+    // Redirect to login page
     router.push("/login")
     router.refresh()
   }
@@ -75,7 +104,7 @@ export default function HorizontalNav() {
     : "U"
 
   return (
-    <header className="bg-white border-b border-border shadow-sm sticky top-0 z-50">
+    <header className="bg-white border-b border-border shadow-sm sticky top-0 z-50 dark:bg-gray-600">
       <div className="px-4 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo and Nav Items - Left Aligned */}
@@ -89,7 +118,7 @@ export default function HorizontalNav() {
                 className="w-10 h-10"
               />
               <div className="hidden sm:block">
-                <h1 className="font-poppins font-bold text-foreground text-xl leading-tight">
+                <h1 className="font-poppins font-bold text-foreground text-xl leading-tight dark:text-white">
                   Ticket Portal
                 </h1>
               </div>
@@ -105,7 +134,7 @@ export default function HorizontalNav() {
                   href={href}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     isActive
-                      ? "bg-primary text-white"
+                      ? "bg-primary dark:bg-gray-900 text-white"
                       : "text-foreground hover:bg-surface"
                   }`}
                 >
@@ -119,6 +148,7 @@ export default function HorizontalNav() {
 
           {/* Right Section - User Info */}
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <NotificationsDropdown />
 
             {/* User Dropdown */}
@@ -147,11 +177,11 @@ export default function HorizontalNav() {
               {showUserMenu && (
                 <>
                   <div
-                    className="fixed inset-0 z-40"
+                    className="fixed inset-0 z-40 "
                     onClick={() => setShowUserMenu(false)}
                   />
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-border py-2 z-50">
-                    <div className="px-4 py-2 border-b border-border md:hidden">
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-600 rounded-lg shadow-lg border border-border py-2 z-50">
+                    <div className="px-4 py-2 border-b border-border md:hidden ">
                       <p className="text-sm font-medium text-foreground">
                         {user?.full_name || "User"}
                       </p>
@@ -162,13 +192,14 @@ export default function HorizontalNav() {
                     <Link
                       href="/settings"
                       onClick={() => setShowUserMenu(false)}
-                      className="block px-4 py-2 text-sm text-foreground hover:bg-surface"
+                      className="block px-4 py-2 text-sm text-foreground hover:bg-surface dark:hover:bg-gray-900"
                     >
                       Settings
                     </Link>
                     <button
                       onClick={handleLogout}
-                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50
+                      dark:hover:bg-gray-900 flex items-center gap-2 dark:text-gray-100"
                     >
                       <LogOut className="w-4 h-4" />
                       Logout

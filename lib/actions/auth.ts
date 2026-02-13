@@ -34,6 +34,29 @@ function sanitizeString(input: string): string {
 
 export async function getCurrentUser() {
   try {
+    // First, try to get user from NextAuth session (for SSO users)
+    try {
+      const { getServerSession } = await import("next-auth")
+      const { authOptions } = await import("@/app/api/auth/[...nextauth]/route")
+      const session = await getServerSession(authOptions)
+      
+      if (session?.user) {
+        return {
+          id: parseInt(session.user.id),
+          email: session.user.email || "",
+          full_name: session.user.name || "",
+          role: session.user.role || "user",
+          business_unit_group_id: session.user.business_unit_group_id,
+          group_name: session.user.group_name,
+          auth_provider: session.user.auth_provider || "microsoft",
+        }
+      }
+    } catch (nextAuthError) {
+      // NextAuth not available or not configured, fall back to cookie auth
+      console.log("NextAuth session not available, using cookie auth")
+    }
+
+    // Fallback to existing cookie-based auth
     const cookieStore = await cookies()
     const userCookie = cookieStore.get("user")
 
@@ -149,6 +172,18 @@ export async function loginUser(email: string, password: string) {
 
     const user = result[0]
 
+    // Check if user is SSO-only (no password)
+    if (!user.password_hash) {
+      return { success: false, error: "This account uses Microsoft SSO. Please sign in with Microsoft." }
+    }
+
+    // Check if user is trying to use password auth but account is SSO-only
+    if (user.auth_provider === "microsoft" && user.password_hash) {
+      // Allow password login if password_hash exists (hybrid account)
+    } else if (user.auth_provider === "microsoft" && !user.password_hash) {
+      return { success: false, error: "This account uses Microsoft SSO. Please sign in with Microsoft." }
+    }
+
     const isPasswordValid = await bcrypt.compare(password, user.password_hash)
 
     if (!isPasswordValid) {
@@ -171,5 +206,126 @@ export async function loginUser(email: string, password: string) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     console.error("[v0] Login error details:", errorMessage)
     return { success: false, error: `Failed to login: ${errorMessage}` }
+  }
+}
+
+// SSO User Management Functions
+
+export async function getUserByEmail(email: string) {
+  try {
+    const sanitizedEmail = email.trim().toLowerCase()
+    const result = await sql`
+      SELECT u.*, bug.name as group_name
+      FROM users u
+      LEFT JOIN business_unit_groups bug ON u.business_unit_group_id = bug.id
+      WHERE u.email = ${sanitizedEmail}
+    `
+    return result[0] || null
+  } catch (error) {
+    console.error("Error fetching user by email:", error)
+    return null
+  }
+}
+
+export async function getUserByMicrosoftId(microsoftId: string) {
+  try {
+    const result = await sql`
+      SELECT u.*, bug.name as group_name
+      FROM users u
+      LEFT JOIN business_unit_groups bug ON u.business_unit_group_id = bug.id
+      WHERE u.microsoft_id = ${microsoftId}
+    `
+    return result[0] || null
+  } catch (error) {
+    console.error("Error fetching user by Microsoft ID:", error)
+    return null
+  }
+}
+
+interface FindOrCreateSSOUserParams {
+  email: string
+  name: string
+  microsoftId: string
+  image?: string | null
+}
+
+export async function findOrCreateSSOUser({
+  email,
+  name,
+  microsoftId,
+  image,
+}: FindOrCreateSSOUserParams) {
+  try {
+    const sanitizedEmail = email.trim().toLowerCase()
+    const sanitizedName = sanitizeString(name)
+
+    // First, try to find by Microsoft ID
+    let user = await getUserByMicrosoftId(microsoftId)
+
+    // If not found, try to find by email
+    if (!user) {
+      user = await getUserByEmail(sanitizedEmail)
+    }
+
+    if (user) {
+      // User exists - update Microsoft ID and auth provider if needed
+      if (!user.microsoft_id) {
+        await sql`
+          UPDATE users 
+          SET microsoft_id = ${microsoftId},
+              auth_provider = 'microsoft',
+              email_verified = TRUE,
+              avatar_url = COALESCE(${image}, avatar_url),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ${user.id}
+        `
+      }
+
+      // Get updated user with group name
+      const updatedUser = await getUserByEmail(sanitizedEmail)
+      const groupResult = await sql`
+        SELECT name FROM business_unit_groups WHERE id = ${updatedUser?.business_unit_group_id}
+      `
+      const groupName = groupResult[0]?.name || ""
+
+      return {
+        success: true,
+        user: {
+          id: updatedUser!.id,
+          email: updatedUser!.email,
+          full_name: updatedUser!.full_name,
+          role: updatedUser!.role,
+          business_unit_group_id: updatedUser!.business_unit_group_id,
+          group_name: groupName,
+          auth_provider: updatedUser!.auth_provider || "microsoft",
+        },
+      }
+    }
+
+    // User doesn't exist - create new user
+    // Default role is 'user', no business_unit_group_id assigned (admin can assign later)
+    const result = await sql`
+      INSERT INTO users (email, full_name, microsoft_id, auth_provider, email_verified, avatar_url, role)
+      VALUES (${sanitizedEmail}, ${sanitizedName}, ${microsoftId}, 'microsoft', TRUE, ${image || null}, 'user')
+      RETURNING id, email, full_name, role, business_unit_group_id
+    `
+
+    const newUser = result[0]
+
+    return {
+      success: true,
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        full_name: newUser.full_name,
+        role: newUser.role,
+        business_unit_group_id: newUser.business_unit_group_id,
+        group_name: "",
+        auth_provider: "microsoft",
+      },
+    }
+  } catch (error) {
+    console.error("Error finding or creating SSO user:", error)
+    return { success: false, error: "Failed to create user account" }
   }
 }

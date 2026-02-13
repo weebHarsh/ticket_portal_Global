@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import { format } from "date-fns"
 import { Eye, Edit, Trash2, Download, Paperclip, FileDown, UserPlus, FileText, X } from "lucide-react"
 import {
@@ -28,7 +29,7 @@ interface Ticket {
   category_name: string | null
   subcategory_name: string | null
   ticket_type: "support" | "requirement"
-  status: "open" | "closed" | "hold"
+  status: "open" | "on-hold" | "resolved" | "closed" | "returned" | "deleted"
   created_at: string
   created_by: number
   creator_name: string | null
@@ -72,6 +73,7 @@ interface TicketsTableProps {
 
 export default function TicketsTable({ filters, onExportReady }: TicketsTableProps) {
   const router = useRouter()
+  const { data: session, status: sessionStatus } = useSession()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -102,16 +104,28 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
+  // Load current user from session or localStorage
   useEffect(() => {
     try {
-      const userData = localStorage.getItem("user")
-      if (userData) {
-        setCurrentUser(JSON.parse(userData))
+      // Prioritize NextAuth session data (for SSO users)
+      if (sessionStatus === "authenticated" && session?.user) {
+        setCurrentUser({
+          id: parseInt(session.user.id || "0"),
+          email: session.user.email || "",
+          full_name: session.user.name || "",
+          role: session.user.role || "user",
+        })
+      } else {
+        // Fallback to localStorage for email/password users
+        const userData = localStorage.getItem("user")
+        if (userData) {
+          setCurrentUser(JSON.parse(userData))
+        }
       }
     } catch (e) {
       console.error("Failed to parse user data:", e)
     }
-  }, [])
+  }, [sessionStatus, session])
 
   useEffect(() => {
     loadTickets()
@@ -270,20 +284,62 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
 
   const canEditStatus = (ticket: Ticket) => {
     if (!currentUser) return false
+    if (ticket.is_deleted || ticket.status === "deleted") return false
     const userId = Number(currentUser.id)
-    return (
-      userId === ticket.spoc_user_id ||
-      userId === ticket.assigned_to ||
-      currentUser.role?.toLowerCase() === "admin"
-    )
+    const isAdmin = currentUser.role?.toLowerCase() === "admin"
+    const isInitiator = userId === ticket.created_by
+    const isAssignee = userId === ticket.assigned_to
+    const isSPOC = userId === ticket.spoc_user_id
+    
+    return isAdmin || isInitiator || isAssignee || isSPOC
+  }
+
+  // Get available status options based on user role
+  const getAvailableStatusOptions = (ticket: Ticket): string[] => {
+    if (!currentUser) return []
+    if (ticket.is_deleted || ticket.status === "deleted") return []
+    
+    const userId = Number(currentUser.id)
+    const isAdmin = currentUser.role?.toLowerCase() === "admin"
+    const isInitiator = userId === ticket.created_by
+    const isAssignee = userId === ticket.assigned_to
+    const isSPOC = userId === ticket.spoc_user_id
+
+    const options: string[] = []
+
+    // Always include current status
+    if (ticket.status) {
+      options.push(ticket.status)
+    }
+
+    if (isAdmin) {
+      // Admins can set any status except deleted (deleted is only for initiator)
+      return ["open", "on-hold", "resolved", "closed", "returned"]
+    }
+
+    if (isAssignee || isSPOC) {
+      // Assignee/SPOC can: On-hold, Resolved, Returned
+      if (!options.includes("on-hold")) options.push("on-hold")
+      if (!options.includes("resolved")) options.push("resolved")
+      if (!options.includes("returned")) options.push("returned")
+    }
+
+    if (isInitiator) {
+      // Initiator can: Closed, Deleted
+      if (!options.includes("closed")) options.push("closed")
+      if (!options.includes("deleted")) options.push("deleted")
+    }
+
+    return options
   }
 
   const handleStatusChange = async (ticketId: number, newStatus: string) => {
     const result = await updateTicketStatus(ticketId, newStatus)
     if (result.success) {
       // Update local state to reflect change without page refresh
+      const updatedStatus = newStatus as "open" | "on-hold" | "resolved" | "closed" | "returned" | "deleted"
       setTickets(tickets.map(t =>
-        t.id === ticketId ? { ...t, status: newStatus as "open" | "closed" | "hold" } : t
+        t.id === ticketId ? { ...t, status: updatedStatus } : t
       ))
     } else {
       alert("Failed to update status: " + (result.error || "Unknown error"))
@@ -310,8 +366,11 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
 
   const statusColor = {
     open: "bg-blue-100 text-blue-700",
+    "on-hold": "bg-yellow-100 text-yellow-700",
+    resolved: "bg-purple-100 text-purple-700",
     closed: "bg-green-100 text-green-700",
-    hold: "bg-yellow-100 text-yellow-700",
+    returned: "bg-orange-100 text-orange-700",
+    deleted: "bg-gray-100 text-gray-700",
   }
 
   const handleExport = () => {
@@ -578,21 +637,17 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                     <select
                       value={ticket.status}
                       onChange={(e) => handleStatusChange(ticket.id, e.target.value)}
-                      className={`px-2 py-1 rounded text-xs font-medium border focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer ${
-                        ticket.status === "open"
-                          ? "bg-blue-50 text-blue-700 border-blue-200"
-                          : ticket.status === "closed"
-                          ? "bg-green-50 text-green-700 border-green-200"
-                          : "bg-yellow-50 text-yellow-700 border-yellow-200"
-                      }`}
+                      className={`px-2 py-1 rounded text-xs font-medium border focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer ${statusColor[ticket.status] || statusColor["open"]}`}
                     >
-                      <option value="open">Open</option>
-                      <option value="closed">Closed</option>
-                      <option value="hold">On-Hold</option>
+                      {getAvailableStatusOptions(ticket).map((status) => (
+                        <option key={status} value={status}>
+                          {status === "on-hold" ? "On-Hold" : status.charAt(0).toUpperCase() + status.slice(1)}
+                        </option>
+                      ))}
                     </select>
                   ) : (
                     <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${statusColor[ticket.status] || statusColor["open"]}`}>
-                      {ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
+                      {ticket.status === "on-hold" ? "On-Hold" : ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
                     </span>
                   )}
                 </td>
@@ -678,10 +733,12 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                     >
                       <Edit className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
                     </button>
-                    {!ticket.is_deleted && (
+                    {!ticket.is_deleted && 
+                     currentUser && 
+                     ticket.created_by === currentUser.id && (
                       <button
                         className="p-1.5 hover:bg-red-50 rounded transition-colors group"
-                        title="Delete"
+                        title="Delete (Only initiator can delete)"
                         onClick={() => handleDelete(ticket.id)}
                       >
                         <Trash2 className="w-4 h-4 text-red-400 group-hover:text-red-600" />
@@ -711,6 +768,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
         onSelect={handleAssigneeSelect}
         currentAssigneeId={selectedTicketForAssignment?.assigned_to || null}
         ticketTitle={selectedTicketForAssignment?.title || ""}
+        ticketBusinessUnitGroupId={selectedTicketForAssignment?.business_unit_group_id || null}
       />
 
       {/* Project Modal */}

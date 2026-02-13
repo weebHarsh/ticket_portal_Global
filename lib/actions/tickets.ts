@@ -290,6 +290,9 @@ export async function createTicket(data: {
 export async function updateTicketStatus(ticketId: number, status: string) {
   try {
     const currentUser = await getCurrentUser()
+    if (!currentUser) {
+      return { success: false, error: "User not authenticated" }
+    }
 
     // Get ticket info before update
     const ticketBefore = await sql`
@@ -302,17 +305,47 @@ export async function updateTicketStatus(ticketId: number, status: string) {
       LEFT JOIN users s ON t.spoc_user_id = s.id
       WHERE t.id = ${ticketId}
     `
-    const oldStatus = ticketBefore[0]?.status
+    
+    if (ticketBefore.length === 0) {
+      return { success: false, error: "Ticket not found" }
+    }
 
+    const ticket = ticketBefore[0]
+    const oldStatus = ticket.status
+    const userId = currentUser.id
+    const isAdmin = currentUser.role?.toLowerCase() === "admin"
+    const isInitiator = userId === ticket.created_by
+    const isAssignee = userId === ticket.assigned_to
+    const isSPOC = userId === ticket.spoc_user_id
+
+    // Validate permissions based on status
+    if (!isAdmin) {
+      if (status === "closed" || status === "deleted") {
+        if (!isInitiator) {
+          return { success: false, error: "Only the ticket initiator can close or delete tickets" }
+        }
+      } else if (status === "on-hold" || status === "resolved" || status === "returned") {
+        if (!isAssignee && !isSPOC) {
+          return { success: false, error: "Only the assignee or SPOC can set status to " + status }
+        }
+      }
+    }
+
+    // Don't allow status changes if ticket is deleted
+    if (ticket.is_deleted || ticket.status === "deleted") {
+      return { success: false, error: "Cannot change status of a deleted ticket" }
+    }
+
+    // Update ticket status with appropriate fields
     await sql`
       UPDATE tickets
       SET status = ${status},
           updated_at = CURRENT_TIMESTAMP,
-          resolved_at = CASE WHEN ${status} = 'closed' THEN CURRENT_TIMESTAMP ELSE resolved_at END,
-          closed_by = CASE WHEN ${status} = 'closed' THEN ${currentUser?.id || null} ELSE closed_by END,
+          resolved_at = CASE WHEN ${status} = 'resolved' THEN CURRENT_TIMESTAMP ELSE resolved_at END,
+          closed_by = CASE WHEN ${status} = 'closed' THEN ${userId} ELSE closed_by END,
           closed_at = CASE WHEN ${status} = 'closed' THEN CURRENT_TIMESTAMP ELSE closed_at END,
-          hold_by = CASE WHEN ${status} = 'hold' THEN ${currentUser?.id || null} ELSE hold_by END,
-          hold_at = CASE WHEN ${status} = 'hold' THEN CURRENT_TIMESTAMP ELSE hold_at END
+          hold_by = CASE WHEN ${status} = 'on-hold' THEN ${userId} ELSE hold_by END,
+          hold_at = CASE WHEN ${status} = 'on-hold' THEN CURRENT_TIMESTAMP ELSE hold_at END
       WHERE id = ${ticketId}
     `
 
@@ -444,11 +477,44 @@ export async function updateTicket(
 
 export async function softDeleteTicket(ticketId: number) {
   try {
+    // Get current user to verify they are the ticket creator
+    const currentUser = await getCurrentUser()
+    if (!currentUser) {
+      return { success: false, error: "User not authenticated" }
+    }
+
+    // Check if user is the ticket creator and get current status
+    const ticket = await sql`
+      SELECT created_by, status FROM tickets WHERE id = ${ticketId}
+    `
+    
+    if (ticket.length === 0) {
+      return { success: false, error: "Ticket not found" }
+    }
+
+    if (ticket[0].created_by !== currentUser.id) {
+      return { success: false, error: "Only the ticket initiator can delete this ticket" }
+    }
+
+    // Virtual delete: set is_deleted flag and status to 'deleted'
     await sql`
       UPDATE tickets
-      SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP
+      SET is_deleted = TRUE, 
+          status = 'deleted',
+          deleted_at = CURRENT_TIMESTAMP
       WHERE id = ${ticketId}
     `
+
+    // Log deletion to audit trail
+    await addAuditLog({
+      ticketId,
+      actionType: 'status_change',
+      oldValue: ticket[0].status || 'open',
+      newValue: 'deleted',
+      performedBy: currentUser.id,
+      performedByName: currentUser.full_name || currentUser.email,
+      notes: 'Ticket deleted by initiator'
+    })
 
     revalidatePath("/tickets")
     revalidatePath("/dashboard")
@@ -481,9 +547,10 @@ export async function restoreTicket(ticketId: number) {
 export async function getUsers() {
   try {
     const result = await sql`
-      SELECT id, full_name, email, role
-      FROM users
-      ORDER BY full_name
+      SELECT u.id, u.full_name, u.email, u.role, u.business_unit_group_id, bug.name as group_name
+      FROM users u
+      LEFT JOIN business_unit_groups bug ON u.business_unit_group_id = bug.id
+      ORDER BY u.full_name
     `
     return { success: true, data: result }
   } catch (error) {

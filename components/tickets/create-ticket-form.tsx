@@ -356,7 +356,7 @@ export default function CreateTicketForm() {
       )}
 
           {/* Ticket Type Selection */}
-      <div className="bg-white border border-border rounded-xl p-6 shadow-lg">
+      <div className="bg-white border border-border rounded-xl p-6 shadow-lg dark:bg-gray-800 dark:border-gray-600 dark:shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground mb-4">Ticket Type</h3>
         <div className="flex gap-4">
           {["support", "requirement"].map((type) => (
@@ -378,7 +378,7 @@ export default function CreateTicketForm() {
       </div>
 
       {/* Ticket Classification */}
-      <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg">
+      <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg dark:bg-gray-800 dark:border-gray-600 dark:shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground">Ticket Classification</h3>
 
         <div>
@@ -500,7 +500,7 @@ export default function CreateTicketForm() {
       </div>
 
       {/* Assignment & Details */}
-      <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg">
+      <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg dark:bg-gray-800 dark:border-gray-600 dark:shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground">Assignment & Details</h3>
 
         <div>
@@ -581,7 +581,7 @@ export default function CreateTicketForm() {
         <button
           type="submit"
           disabled={isLoading}
-          className="px-6 py-3 bg-gradient-to-r from-primary to-secondary text-white rounded-lg font-medium hover:shadow-lg transition-all disabled:opacity-70"
+          className="px-6 py-3 bg-gradient-to-r from-primary to-secondary text-white rounded-lg font-medium hover:shadow-lg transition-all"
         >
           {isLoading ? "Creating..." : "Create Ticket"}
         </button>

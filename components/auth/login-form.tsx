@@ -2,8 +2,10 @@
 
 import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
+import { signIn } from "next-auth/react"
 import Image from "next/image"
 import { AlertCircle, LogIn } from "lucide-react"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface User {
   id: string
@@ -19,6 +21,7 @@ export function LoginForm() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [isSSOLoading, setIsSSOLoading] = useState(false)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -59,9 +62,31 @@ export function LoginForm() {
     }
   }
 
+  const handleMicrosoftSignIn = async () => {
+    setError("")
+    setIsSSOLoading(true)
+    try {
+      // Use redirect: true to let NextAuth handle the OAuth flow
+      await signIn("azure-ad", {
+        redirect: true,
+        callbackUrl: "/dashboard",
+      })
+      // Note: We don't need to handle result here because redirect: true
+      // will automatically redirect to Microsoft login page
+    } catch (err) {
+      console.error("Microsoft sign-in error:", err)
+      setError("Microsoft sign-in failed. Please try again.")
+      setIsSSOLoading(false)
+    }
+  }
+
   return (
     <div className="w-full max-w-md">
-      <div className="bg-white rounded-xl shadow-2xl p-8">
+      {/* Theme Toggle - Top Right */}
+      <div className="flex justify-end mb-4">
+        <ThemeToggle />
+      </div>
+      <div className="bg-card rounded-xl shadow-2xl p-8 border border-border">
         {/* Logo and Header */}
         <div className="text-center mb-8">
           <Image
@@ -81,6 +106,37 @@ export function LoginForm() {
             <p className="text-destructive text-sm">{error}</p>
           </div>
         )}
+
+        {/* Microsoft SSO Button */}
+        <button
+          type="button"
+          onClick={handleMicrosoftSignIn}
+          disabled={isSSOLoading || isLoading}
+          className="w-full mb-4 bg-card border-2 border-border text-foreground font-sans font-semibold py-3 rounded-lg hover:bg-surface hover:border-primary transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-70"
+        >
+          <svg
+            className="w-5 h-5"
+            viewBox="0 0 23 23"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect x="0" y="0" width="11" height="11" fill="#F25022" />
+            <rect x="12" y="0" width="11" height="11" fill="#7FBA00" />
+            <rect x="0" y="12" width="11" height="11" fill="#00A4EF" />
+            <rect x="12" y="12" width="11" height="11" fill="#FFB900" />
+          </svg>
+          {isSSOLoading ? "Signing in..." : "Sign in with Microsoft"}
+        </button>
+
+        {/* Divider */}
+        <div className="relative mb-4">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border"></div>
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+          </div>
+        </div>
 
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-4">

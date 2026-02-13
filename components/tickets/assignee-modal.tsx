@@ -20,6 +20,7 @@ interface AssigneeModalProps {
   onSelect: (userId: number | null) => void
   currentAssigneeId: number | null
   ticketTitle: string
+  ticketBusinessUnitGroupId?: number | null
 }
 
 export default function AssigneeModal({
@@ -28,6 +29,7 @@ export default function AssigneeModal({
   onSelect,
   currentAssigneeId,
   ticketTitle,
+  ticketBusinessUnitGroupId,
 }: AssigneeModalProps) {
   const [users, setUsers] = useState<User[]>([])
   const [businessGroups, setBusinessGroups] = useState<any[]>([])
@@ -35,6 +37,7 @@ export default function AssigneeModal({
   const [selectedBUGroup, setSelectedBUGroup] = useState<string>("all")
   const [loading, setLoading] = useState(true)
   const [selectedUserId, setSelectedUserId] = useState<number | null>(currentAssigneeId)
+  const [showOtherGroups, setShowOtherGroups] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
@@ -42,6 +45,7 @@ export default function AssigneeModal({
       setSelectedUserId(currentAssigneeId)
       setSearchTerm("")
       setSelectedBUGroup("all")
+      setShowOtherGroups(false)
     }
   }, [isOpen, currentAssigneeId])
 
@@ -53,7 +57,7 @@ export default function AssigneeModal({
     ])
 
     if (usersResult.success && usersResult.data) {
-      setUsers(usersResult.data)
+      setUsers(usersResult.data as User[])
     }
     if (buResult.success && buResult.data) {
       setBusinessGroups(buResult.data)
@@ -61,17 +65,51 @@ export default function AssigneeModal({
     setLoading(false)
   }
 
-  const filteredUsers = users.filter((user) => {
+  // Separate users by group
+  const usersInTargetGroup = users.filter((user) => {
     const matchesSearch =
       user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.email?.toLowerCase().includes(searchTerm.toLowerCase())
-
-    const matchesBUGroup =
-      selectedBUGroup === "all" ||
-      user.business_unit_group_id === parseInt(selectedBUGroup)
-
-    return matchesSearch && matchesBUGroup
+    
+    // If no ticketBusinessUnitGroupId is provided, show all users in target group section
+    const isInTargetGroup = ticketBusinessUnitGroupId 
+      ? user.business_unit_group_id === ticketBusinessUnitGroupId
+      : true  // Show all users if no group specified
+    
+    // Always include current assignee even if from different group
+    const isCurrentAssignee = user.id === currentAssigneeId
+    
+    return matchesSearch && (isInTargetGroup || isCurrentAssignee)
   })
+
+  const usersInOtherGroups = users.filter((user) => {
+    const matchesSearch =
+      user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email?.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    // If no ticketBusinessUnitGroupId, don't show "other groups" section
+    if (!ticketBusinessUnitGroupId) {
+      return false
+    }
+    
+    const isInTargetGroup = user.business_unit_group_id === ticketBusinessUnitGroupId
+    
+    // Exclude current assignee from other groups (already shown in target group)
+    const isCurrentAssignee = user.id === currentAssigneeId
+    
+    return matchesSearch && !isInTargetGroup && !isCurrentAssignee
+  })
+
+  // Filter by selected BU group if filter is applied
+  const filteredUsersInTargetGroup = selectedBUGroup === "all" 
+    ? usersInTargetGroup
+    : usersInTargetGroup.filter(user => user.business_unit_group_id === parseInt(selectedBUGroup))
+
+  const filteredUsersInOtherGroups = selectedBUGroup === "all"
+    ? usersInOtherGroups
+    : usersInOtherGroups.filter(user => user.business_unit_group_id === parseInt(selectedBUGroup))
+
+  const hasOtherGroupsUsers = filteredUsersInOtherGroups.length > 0
 
   const handleConfirm = () => {
     onSelect(selectedUserId)
@@ -150,44 +188,105 @@ export default function AssigneeModal({
             <div className="flex items-center justify-center h-32">
               <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : filteredUsers.length === 0 ? (
+          ) : filteredUsersInTargetGroup.length === 0 && filteredUsersInOtherGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
               <User className="w-8 h-8 mb-2 opacity-50" />
               <p className="text-sm">No employees found</p>
             </div>
           ) : (
             <div className="space-y-1">
-              {filteredUsers.map((user) => (
+              {/* Users from target group */}
+              {filteredUsersInTargetGroup.length > 0 && (
+                <>
+                  {filteredUsersInTargetGroup.map((user) => (
+                    <button
+                      key={user.id}
+                      onClick={() => setSelectedUserId(user.id)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left ${
+                        selectedUserId === user.id
+                          ? "bg-primary/10 border-2 border-primary"
+                          : "hover:bg-surface border-2 border-transparent"
+                      }`}
+                    >
+                      <div className="w-10 h-10 bg-gradient-to-br from-primary to-secondary rounded-full flex items-center justify-center text-white font-medium text-sm">
+                        {user.full_name
+                          ?.split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate">
+                          {user.full_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {user.email}
+                        </p>
+                      </div>
+                      {selectedUserId === user.id && (
+                        <Check className="w-5 h-5 text-primary flex-shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {/* More... button to show other groups */}
+              {hasOtherGroupsUsers && !showOtherGroups && (
                 <button
-                  key={user.id}
-                  onClick={() => setSelectedUserId(user.id)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left ${
-                    selectedUserId === user.id
-                      ? "bg-primary/10 border-2 border-primary"
-                      : "hover:bg-surface border-2 border-transparent"
-                  }`}
+                  onClick={() => setShowOtherGroups(true)}
+                  className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-border hover:bg-surface transition-colors text-sm font-medium text-muted-foreground hover:text-foreground"
                 >
-                  <div className="w-10 h-10 bg-gradient-to-br from-primary to-secondary rounded-full flex items-center justify-center text-white font-medium text-sm">
-                    {user.full_name
-                      ?.split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .toUpperCase()
-                      .slice(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground truncate">
-                      {user.full_name}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {user.email}
-                    </p>
-                  </div>
-                  {selectedUserId === user.id && (
-                    <Check className="w-5 h-5 text-primary flex-shrink-0" />
-                  )}
+                  <span>More...</span>
+                  <span className="text-xs">({filteredUsersInOtherGroups.length} from other groups)</span>
                 </button>
-              ))}
+              )}
+
+              {/* Users from other groups */}
+              {showOtherGroups && filteredUsersInOtherGroups.length > 0 && (
+                <>
+                  <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide border-t border-border mt-2 pt-2">
+                    Other Groups
+                  </div>
+                  {filteredUsersInOtherGroups.map((user) => (
+                    <button
+                      key={user.id}
+                      onClick={() => setSelectedUserId(user.id)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left ${
+                        selectedUserId === user.id
+                          ? "bg-primary/10 border-2 border-primary"
+                          : "hover:bg-surface border-2 border-transparent"
+                      }`}
+                    >
+                      <div className="w-10 h-10 bg-gradient-to-br from-primary to-secondary rounded-full flex items-center justify-center text-white font-medium text-sm">
+                        {user.full_name
+                          ?.split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate">
+                          {user.full_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {user.email}
+                        </p>
+                        {user.group_name && (
+                          <p className="text-xs text-muted-foreground/70 truncate">
+                            {user.group_name}
+                          </p>
+                        )}
+                      </div>
+                      {selectedUserId === user.id && (
+                        <Check className="w-5 h-5 text-primary flex-shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>

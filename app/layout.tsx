@@ -3,6 +3,9 @@ import type { Metadata, Viewport } from "next"
 import { Poppins, Open_Sans } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { ErrorBoundary } from "@/components/error-boundary"
+import { NextAuthSessionProvider } from "@/components/providers/session-provider"
+import { SessionRefresher } from "@/components/providers/session-refresher"
+import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 
 const poppins = Poppins({
@@ -54,12 +57,24 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${poppins.variable} ${openSans.variable}`}>
+    <html lang="en" className={`${poppins.variable} ${openSans.variable}`} suppressHydrationWarning>
       <body 
         className={`font-sans antialiased bg-background text-foreground`}
         suppressHydrationWarning
       >
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <ErrorBoundary>
+            <NextAuthSessionProvider>
+              <SessionRefresher />
+              {children}
+            </NextAuthSessionProvider>
+          </ErrorBoundary>
+        </ThemeProvider>
         <Analytics />
       </body>
     </html>

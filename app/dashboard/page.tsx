@@ -21,7 +21,7 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="bg-card p-4 rounded-md shadow-xl">
+      <div className="bg-card p-4 rounded-md shadow-xl dark:bg-gray-700">
       <div className="max-w-4xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-poppins font-bold text-foreground mb-2">New Ticket</h1>
