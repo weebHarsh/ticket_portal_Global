@@ -3,12 +3,11 @@
 import { neon } from "@neondatabase/serverless"
 import bcrypt from "bcryptjs"
 import { cookies } from "next/headers"
+import { getDatabaseUrl } from "@/lib/utils/db-config"
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL environment variable is not set")
-}
-
-const sql = neon(process.env.DATABASE_URL)
+// Get the appropriate database URL based on environment
+const databaseUrl = getDatabaseUrl()
+const sql = neon(databaseUrl)
 
 // OWASP: Email validation regex
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/

@@ -1,8 +1,11 @@
 import { neon } from "@neondatabase/serverless"
 import { type NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
+import { getDatabaseUrl } from "@/lib/utils/db-config"
 
-const sql = neon(process.env.DATABASE_URL!)
+// Get the appropriate database URL based on environment
+const databaseUrl = getDatabaseUrl()
+const sql = neon(databaseUrl)
 
 export async function POST(request: NextRequest) {
   try {

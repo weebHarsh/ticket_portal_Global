@@ -58,21 +58,31 @@ async function setupDatabase() {
   console.log('🚀 Database Setup Starting...\n');
   console.log('=' .repeat(60));
 
-  // Check for DATABASE_URL
-  if (!process.env.DATABASE_URL) {
-    console.error('\n❌ ERROR: DATABASE_URL not found!');
-    console.error('\nPlease set DATABASE_URL in .env.local file');
-    console.error('\nFor local PostgreSQL:');
-    console.error('DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ticketing?sslmode=disable"');
-    console.error('\nFor Neon cloud:');
-    console.error('DATABASE_URL="postgresql://user:pass@ep-xxx.region.aws.neon.tech/dbname?sslmode=require"');
+  // Get database URL based on environment
+  const isProduction = process.env.NODE_ENV === 'production';
+  const databaseUrl = isProduction
+    ? (process.env.DATABASE_URL_PROD || process.env.DATABASE_URL)
+    : (process.env.DATABASE_URL_DEV || process.env.DATABASE_URL);
+
+  if (!databaseUrl) {
+    console.error('\n❌ ERROR: Database URL not found!');
+    console.error('\nPlease set database URL in .env.local file');
+    if (isProduction) {
+      console.error('\nFor Production:');
+      console.error('DATABASE_URL_PROD="postgresql://user:pass@host:5432/dbname?sslmode=require"');
+    } else {
+      console.error('\nFor Development:');
+      console.error('DATABASE_URL_DEV="postgresql://postgres:postgres@localhost:5432/ticketing?sslmode=disable"');
+    }
+    console.error('\nOr use fallback:');
+    console.error('DATABASE_URL="postgresql://user:pass@host:5432/dbname?sslmode=require"');
     process.exit(1);
   }
 
-  console.log('✓ DATABASE_URL configured');
+  console.log(`✓ Database URL configured (${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'})`);
   console.log('✓ Connecting to database...\n');
 
-  const sql = neon(process.env.DATABASE_URL);
+  const sql = neon(databaseUrl);
 
   // Test connection
   try {
