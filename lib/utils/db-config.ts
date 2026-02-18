@@ -1,31 +1,23 @@
 
 /**
- * Gets the appropriate database URL based on the current environment
+ * Gets the database URL from environment variables
+ * Uses a single DATABASE_URL for both development and production
+ * 
  * @returns The database connection string
- * @throws Error if no database URL is configured
+ * @throws Error if DATABASE_URL is not configured
  */
 export function getDatabaseUrl(): string {
-  const isProduction = process.env.NODE_ENV === 'production'
+  const databaseUrl = process.env.DATABASE_URL
   
-  // In production, use DATABASE_URL
-  if (isProduction) {
-    const prodUrl = process.env.DATABASE_URL || process.env.DATABASE_URL
-    if (!prodUrl) {
-      throw new Error(
-        'DATABASE_URL or DATABASE_URL environment variable is required in production'
-      )
-    }
-    return prodUrl
-  }
-  
-  // In development, prefer DATABASE_URL, fallback to DATABASE_URL
-  const devUrl = process.env.DATABASE_URL || process.env.DATABASE_URL
-  if (!devUrl) {
+  if (!databaseUrl) {
+    console.error('❌ Database Configuration Error:')
+    console.error('   DATABASE_URL:', process.env.DATABASE_URL ? '✅ Set' : '❌ Not set')
     throw new Error(
-      'DATABASE_URL or DATABASE_URL environment variable is required in development'
+      'DATABASE_URL environment variable is required'
     )
   }
-  return devUrl
+  
+  return databaseUrl
 }
 
 /**

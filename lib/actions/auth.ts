@@ -221,6 +221,16 @@ export async function loginUser(email: string, password: string) {
     console.error("[v0] Login error:", error)
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     console.error("[v0] Login error details:", errorMessage)
+    
+    // Check if it's a database connection error
+    if (errorMessage.includes("DATABASE_URL") || errorMessage.includes("database") || errorMessage.includes("connection")) {
+      console.error("[v0] Database connection error detected")
+      return { 
+        success: false, 
+        error: "Database connection failed. Please check server configuration." 
+      }
+    }
+    
     return { success: false, error: `Failed to login: ${errorMessage}` }
   }
 }

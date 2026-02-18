@@ -58,27 +58,18 @@ async function setupDatabase() {
   console.log('🚀 Database Setup Starting...\n');
   console.log('=' .repeat(60));
 
-  // Get database URL based on environment
-  const isProduction = process.env.NODE_ENV === 'production';
-  const databaseUrl = isProduction
-    ? (process.env.DATABASE_URL || process.env.DATABASE_URL)
-    : (process.env.DATABASE_URL || process.env.DATABASE_URL);
+  // Get database URL - uses single DATABASE_URL for both environments
+  const databaseUrl = process.env.DATABASE_URL;
 
   if (!databaseUrl) {
     console.error('\n❌ ERROR: Database URL not found!');
-    console.error('\nPlease set database URL in .env.local file');
-    if (isProduction) {
-      console.error('\nFor Production:');
-      console.error('DATABASE_URL="postgresql://user:pass@host:5432/dbname?sslmode=require"');
-    } else {
-      console.error('\nFor Development:');
-      console.error('DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ticketing?sslmode=disable"');
-    }
-    console.error('\nOr use fallback:');
+    console.error('\nPlease set DATABASE_URL in .env.local file');
+    console.error('Example:');
     console.error('DATABASE_URL="postgresql://user:pass@host:5432/dbname?sslmode=require"');
     process.exit(1);
   }
 
+  const isProduction = process.env.NODE_ENV === 'production';
   console.log(`✓ Database URL configured (${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'})`);
   console.log('✓ Connecting to database...\n');
 
