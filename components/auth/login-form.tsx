@@ -15,6 +15,14 @@ interface User {
   group: string
 }
 
+// Map NextAuth error codes to user-friendly messages
+const errorMessages: Record<string, string> = {
+  AccessDenied: "Access denied. Please contact your administrator to request access.",
+  Configuration: "There is a problem with the server configuration. Please contact support.",
+  Verification: "The verification token has expired or has already been used.",
+  Default: "An error occurred during sign-in. Please try again.",
+}
+
 export function LoginForm() {
   const router = useRouter()
   const { setTheme } = useTheme()
@@ -28,6 +36,23 @@ export function LoginForm() {
   useEffect(() => {
     setTheme("light")
   }, [setTheme])
+
+  // Check for error in URL query parameters (from NextAuth redirects)
+  useEffect(() => {
+    // Read error from URL search params (client-side only)
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search)
+      const errorParam = urlParams.get("error")
+      if (errorParam) {
+        const errorMessage = errorMessages[errorParam] || errorMessages.Default
+        setError(errorMessage)
+        // Clean up the URL by removing the error parameter
+        urlParams.delete("error")
+        const newUrl = window.location.pathname + (urlParams.toString() ? `?${urlParams.toString()}` : "")
+        window.history.replaceState({}, "", newUrl)
+      }
+    }
+  }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

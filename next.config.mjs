@@ -20,11 +20,12 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline'", // 'unsafe-eval' for Next.js dev, 'unsafe-inline' for inline scripts
+              // Allow Vercel's live feedback script in production
+              "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://vercel.live", // 'unsafe-eval' for Next.js dev, 'unsafe-inline' for inline scripts, vercel.live for Vercel feedback
               "style-src 'self' 'unsafe-inline'", // 'unsafe-inline' required for Tailwind CSS
               "img-src 'self' data: https: blob:",
               "font-src 'self' data: https:",
-              "connect-src 'self' https:",
+              "connect-src 'self' https: https://vercel.live", // Allow Vercel live feedback connections
               "frame-ancestors 'none'", // Prevents embedding in iframes (clickjacking protection)
               "base-uri 'self'",
               "form-action 'self'",
