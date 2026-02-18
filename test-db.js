@@ -6,6 +6,8 @@ const client = new Client({
   connectionString: process.env.DATABASE_URL,
 });
 
+console.log("===== 1. DATABASE_URL:", process.env.DATABASE_URL);
+
 client.connect()
   .then(() => {
     console.log("DB Connected Successfully");

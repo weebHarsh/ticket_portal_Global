@@ -1,26 +1,11 @@
-import { neon } from "@neondatabase/serverless"
+import { neon, NeonQueryFunction } from "@neondatabase/serverless"
 import { getDatabaseUrl } from "./utils/db-config"
 
-// Lazy initialization: only get database URL when actually needed (at runtime, not build time)
-let sqlInstance: ReturnType<typeof neon> | null = null
+// ✅ Simple, direct initialization - no Proxy, no lazy tricks
+const databaseUrl = getDatabaseUrl()
+export const sql: NeonQueryFunction<false, false> = neon(databaseUrl)
 
-function getSql() {
-  if (!sqlInstance) {
-    const databaseUrl = getDatabaseUrl()
-    sqlInstance = neon(databaseUrl)
-  }
-  return sqlInstance
-}
-
-// Export a getter that initializes on first use
-// Using Proxy to maintain the same API while deferring initialization
-export const sql = new Proxy({} as any, {
-  get(_target, prop) {
-    const instance = getSql()
-    const value = (instance as any)[prop]
-    return typeof value === 'function' ? value.bind(instance) : value
-  }
-}) as ReturnType<typeof neon>
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type User = {
   id: number
@@ -66,7 +51,6 @@ export type Ticket = {
   resolved_at: Date | null
   created_at: Date
   updated_at: Date
-  // New fields for internal tickets, sub-tickets, and redirection
   is_internal: boolean
   parent_ticket_id: number | null
   redirected_from_business_unit_group_id: number | null

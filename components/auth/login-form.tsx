@@ -74,7 +74,10 @@ export function LoginForm() {
       const data = await response.json()
 
       if (!response.ok) {
-        setError(data.error || "Invalid email or password")
+        // Show the actual error message from the server
+        const errorMsg = data.error || data.details || "Invalid email or password"
+        console.error("[LoginForm] Login failed:", errorMsg)
+        setError(errorMsg)
         return
       }
 
