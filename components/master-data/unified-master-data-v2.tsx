@@ -220,7 +220,7 @@ export default function UnifiedMasterDataV2() {
   }
 
   return (
-    <div className="bg-white border border-border rounded-xl p-6">
+    <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="business-groups">Business Groups</TabsTrigger>
@@ -256,7 +256,7 @@ export default function UnifiedMasterDataV2() {
               businessGroups.map((bg) => (
                 <div
                   key={bg.id}
-                  className="flex justify-between items-center p-4 border border-border rounded-lg hover:border-primary/50 transition-all"
+                  className="flex justify-between items-center p-4 border border-border rounded-lg hover:border-primary/50 dark:hover:border-primary transition-all"
                 >
                   <div>
                     <h3 className="font-semibold text-foreground">{bg.name}</h3>
@@ -308,11 +308,11 @@ export default function UnifiedMasterDataV2() {
                 return (
                   <div key={category.id} className="border border-border rounded-lg">
                     {/* Category Header */}
-                    <div className="flex items-center justify-between p-4 bg-gray-50">
+                    <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50">
                       <div className="flex items-center gap-2 flex-1">
                         <button
                           onClick={() => toggleCategory(category.id)}
-                          className="hover:bg-white rounded p-1"
+                          className="hover:bg-white dark:hover:bg-gray-600 rounded p-1"
                         >
                           {expandedCategories.has(category.id) ? (
                             <ChevronDown className="w-5 h-5" />
@@ -347,7 +347,7 @@ export default function UnifiedMasterDataV2() {
                             return (
                               <div
                                 key={subcat.id}
-                                className="border border-border rounded-lg p-3 ml-6 bg-white"
+                                className="border border-border rounded-lg p-3 ml-6 bg-white dark:bg-gray-800"
                               >
                                 <div className="flex justify-between items-start">
                                   <div className="flex-1">
@@ -366,7 +366,7 @@ export default function UnifiedMasterDataV2() {
                                         {subcatMappings.map((mapping) => (
                                           <div
                                             key={mapping.id}
-                                            className="grid grid-cols-4 gap-4 text-xs bg-blue-50 p-2 rounded"
+                                            className="grid grid-cols-4 gap-4 text-xs bg-blue-50 dark:bg-blue-900/20 p-2 rounded"
                                           >
                                             <div>
                                               <span className="text-foreground-secondary">BG:</span>{" "}

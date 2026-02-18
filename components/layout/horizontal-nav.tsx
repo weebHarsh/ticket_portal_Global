@@ -104,7 +104,7 @@ export default function HorizontalNav() {
     : "U"
 
   return (
-    <header className="bg-white border-b border-border shadow-sm sticky top-0 z-50 dark:bg-gray-600">
+    <header className="bg-white border-b border-border shadow-sm sticky top-0 z-50 dark:bg-gray-800 dark:shadow-gray-300">
       <div className="px-4 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo and Nav Items - Left Aligned */}
@@ -134,8 +134,8 @@ export default function HorizontalNav() {
                   href={href}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     isActive
-                      ? "bg-primary dark:bg-gray-900 text-white"
-                      : "text-foreground hover:bg-surface"
+                      ? "bg-primary dark:bg-gray-600 text-white"
+                      : "text-foreground hover:bg-surface dark:hover:bg-gray-700"
                   }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -147,8 +147,9 @@ export default function HorizontalNav() {
           </div>
 
           {/* Right Section - User Info */}
-          <div className="flex items-center gap-3">
-            <ThemeToggle />
+          <div className="flex items-center gap-3 ">
+            <ThemeToggle 
+            />
             <NotificationsDropdown />
 
             {/* User Dropdown */}

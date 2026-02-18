@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import React, { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { format } from "date-fns"
-import { Eye, Edit, Trash2, Download, Paperclip, FileDown, UserPlus, FileText, X } from "lucide-react"
+import { Eye, Edit, Trash2, Download, Paperclip, FileDown, UserPlus, FileText, X, ChevronRight, ChevronDown } from "lucide-react"
 import {
   getTickets,
   getTicketById,
@@ -49,6 +49,16 @@ interface Ticket {
   closed_at: string | null
   hold_by_name: string | null
   hold_at: string | null
+  // New fields for internal tickets, sub-tickets, and redirection
+  is_internal: boolean
+  parent_ticket_id: number | null
+  redirected_from_business_unit_group_id: number | null
+  redirected_from_spoc_user_id: number | null
+  redirected_from_group_name: string | null
+  redirected_from_spoc_name: string | null
+  redirection_remarks: string | null
+  redirected_at: string | null
+  child_ticket_count: number
 }
 
 interface User {
@@ -67,6 +77,9 @@ interface TicketsTableProps {
     dateTo?: string
     myTeam?: boolean
     userId?: number
+    isInternal?: boolean
+    targetBusinessGroup?: string
+    [key: string]: any
   }
   onExportReady?: (exportFn: () => void) => void
 }
@@ -78,6 +91,8 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<any>(null)
+  const [expandedTickets, setExpandedTickets] = useState<Set<number>>(new Set())
+  const [childTickets, setChildTickets] = useState<Map<number, Ticket[]>>(new Map())
 
   // Modal state for assignee selection
   const [isAssigneeModalOpen, setIsAssigneeModalOpen] = useState(false)
@@ -139,11 +154,65 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
     }
   }, [tickets])
 
+  // Load child tickets when a parent ticket is expanded
+  useEffect(() => {
+    const loadChildTickets = async () => {
+      const promises: Promise<void>[] = []
+      
+      expandedTickets.forEach((parentId) => {
+        if (!childTickets.has(parentId)) {
+          promises.push(
+            getTickets({ parentTicketId: parentId })
+              .then((result) => {
+                if (result.success && result.data) {
+                  setChildTickets((prev) => {
+                    const newMap = new Map(prev)
+                    newMap.set(parentId, result.data as Ticket[])
+                    return newMap
+                  })
+                }
+              })
+              .catch((error) => {
+                console.error(`Error loading child tickets for ${parentId}:`, error)
+              })
+          )
+        }
+      })
+
+      await Promise.all(promises)
+    }
+
+    if (expandedTickets.size > 0) {
+      loadChildTickets()
+    }
+  }, [expandedTickets])
+
+  const toggleExpand = (ticketId: number) => {
+    setExpandedTickets((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(ticketId)) {
+        newSet.delete(ticketId)
+      } else {
+        newSet.add(ticketId)
+      }
+      return newSet
+    })
+  }
+
+  const canEditTicket = (ticket: Ticket) => {
+    if (!currentUser) return false
+    const isAdmin = currentUser.role?.toLowerCase() === "admin"
+    const isInitiator = currentUser.id === ticket.created_by
+    const isAssignee = currentUser.id === ticket.assigned_to
+    const isSPOC = currentUser.id === ticket.spoc_user_id
+    return isAdmin || isInitiator || isAssignee || isSPOC
+  }
+
   const loadTickets = async () => {
     setIsLoading(true)
     const result = await getTickets(filters)
-    if (result.success) {
-      let ticketsData = result.data
+    if (result.success && result.data) {
+      let ticketsData = result.data as Ticket[]
 
       // Filter tickets based on user role and team settings
       if (currentUser && currentUser.role?.toLowerCase() !== "admin") {
@@ -178,6 +247,8 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
       }
 
       setTickets(ticketsData)
+    } else {
+      setTickets([])
     }
     setIsLoading(false)
   }
@@ -192,7 +263,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
   const handleDuplicate = async (ticketId: number) => {
     const result = await getTicketById(ticketId)
     if (result.success && result.data) {
-      const ticket = result.data
+      const ticket = result.data as any
       const params = new URLSearchParams({
         duplicate: "true",
         ticketType: ticket.ticket_type || "support",
@@ -205,6 +276,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
         estimatedDuration: ticket.estimated_duration || "",
         assigneeId: ticket.assigned_to?.toString() || "",
         productReleaseName: ticket.product_release_name || "",
+        isInternal: ticket.is_internal ? "true" : "false",
       })
       router.push(`/tickets/create?${params.toString()}`)
     }
@@ -441,7 +513,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
 
   if (isLoading) {
     return (
-      <div className="bg-white border border-border rounded-xl overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 border border-border rounded-xl overflow-hidden">
         <div className="p-8 text-center text-foreground-secondary">Loading tickets...</div>
       </div>
     )
@@ -449,7 +521,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
 
   if (tickets.length === 0) {
     return (
-      <div className="bg-white border border-border rounded-xl overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 border border-border rounded-xl overflow-hidden">
         <div className="p-8 text-center text-foreground-secondary">
           No tickets found. Try adjusting your filters or create a new ticket.
         </div>
@@ -458,11 +530,12 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
   }
 
   return (
-    <div className="bg-white border border-border rounded-xl overflow-hidden">
+    <div className="bg-white dark:bg-gray-800 border border-border rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-surface border-b border-border">
+          <thead className="bg-surface dark:bg-gray-700 border-b border-border">
             <tr>
+              <th className="px-3 py-2.5 text-left text-xs font-semibold text-foreground whitespace-nowrap w-10"></th>
               <th className="px-3 py-2.5 text-left text-xs font-semibold text-foreground whitespace-nowrap">
                 Initiator
               </th>
@@ -484,6 +557,11 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
               <th className="px-3 py-2.5 text-left text-xs font-semibold text-foreground whitespace-nowrap">
                 SPOC
               </th>
+              {filters?.isInternal && (
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-foreground whitespace-nowrap">
+                  Target Business Group
+                </th>
+              )}
               <th className="px-3 py-2.5 text-left text-xs font-semibold text-foreground whitespace-nowrap">
                 Assignee
               </th>
@@ -499,21 +577,50 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {tickets.map((ticket, index) => (
-              <tr
-                key={ticket.id}
-                className={`hover:bg-surface transition-colors ${
-                  ticket.is_deleted ? "opacity-50 bg-gray-50" : ""
-                }`}
-              >
-                {/* Initiator Name and Group */}
-                <td
-                  className="px-3 py-2.5 whitespace-nowrap cursor-pointer hover:text-primary"
-                  onClick={() => router.push(`/tickets/${ticket.id}`)}
-                >
-                  <div className="text-sm font-medium text-foreground">{ticket.creator_name || "Unknown"}</div>
-                  <div className="text-xs text-foreground-secondary">{ticket.group_name || "No Group"}</div>
-                </td>
+            {tickets
+              .filter((t) => !t.parent_ticket_id) // Only show parent tickets in main list
+              .map((ticket, index) => {
+                const hasChildren = (ticket.child_ticket_count || 0) > 0
+                const isExpanded = expandedTickets.has(ticket.id)
+                const children = childTickets.get(ticket.id) || []
+
+                return (
+                  <React.Fragment key={ticket.id}>
+                    <tr
+                      className={`hover:bg-surface dark:hover:bg-gray-700 transition-colors ${
+                        ticket.is_deleted ? "opacity-50 bg-gray-50 dark:bg-gray-900/50" : ""
+                      }`}
+                    >
+                      {/* Expand/Collapse Button */}
+                      <td className="px-3 py-2.5 whitespace-nowrap w-10">
+                        {hasChildren ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleExpand(ticket.id)
+                            }}
+                            className="p-1 hover:bg-surface dark:hover:bg-gray-700 rounded transition-colors"
+                            title={isExpanded ? "Collapse" : "Expand"}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-4 h-4 text-foreground-secondary" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4 text-foreground-secondary" />
+                            )}
+                          </button>
+                        ) : (
+                          <div className="w-4 h-4" />
+                        )}
+                      </td>
+
+                      {/* Initiator Name and Group */}
+                      <td
+                        className="px-3 py-2.5 whitespace-nowrap cursor-pointer hover:text-primary"
+                        onClick={() => router.push(`/tickets/${ticket.id}`)}
+                      >
+                        <div className="text-sm font-medium text-foreground">{ticket.creator_name || "Unknown"}</div>
+                        <div className="text-xs text-foreground-secondary">{ticket.group_name || "No Group"}</div>
+                      </td>
 
                 {/* Date - Compact format */}
                 <td
@@ -608,6 +715,13 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                   <span className="text-sm text-foreground">{ticket.spoc_name || "-"}</span>
                 </td>
 
+                {/* Target Business Group (Internal Tickets Only) */}
+                {filters?.isInternal && (
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <span className="text-sm text-foreground">{ticket.group_name || "-"}</span>
+                  </td>
+                )}
+
                 {/* Assignee */}
                 <td className="px-3 py-2.5 whitespace-nowrap">
                   {ticket.assignee_name ? (
@@ -667,12 +781,12 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
 
                       {/* Attachments Dropdown */}
                       {attachmentsDropdownOpen === ticket.id && (
-                        <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-border rounded-lg shadow-lg z-50">
-                          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-surface/50">
+                        <div className="absolute right-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-50">
+                          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-surface/50 dark:bg-gray-700/50">
                             <span className="text-xs font-semibold text-foreground">Attachments</span>
                             <button
                               onClick={() => setAttachmentsDropdownOpen(null)}
-                              className="p-0.5 hover:bg-surface rounded"
+                              className="p-0.5 hover:bg-surface dark:hover:bg-gray-700 rounded"
                             >
                               <X className="w-3.5 h-3.5 text-muted-foreground" />
                             </button>
@@ -690,7 +804,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                                   download={attachment.file_name}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="flex items-center gap-2 px-3 py-2 hover:bg-surface transition-colors border-b border-border last:border-b-0"
+                                  className="flex items-center gap-2 px-3 py-2 hover:bg-surface dark:hover:bg-gray-700 transition-colors border-b border-border last:border-b-0"
                                 >
                                   <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                                   <div className="flex-1 min-w-0">
@@ -735,10 +849,10 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                     </button>
                     {!ticket.is_deleted && 
                      currentUser && 
-                     ticket.created_by === currentUser.id && (
+                     (ticket.created_by === currentUser.id || currentUser.role?.toLowerCase() === "admin") && (
                       <button
                         className="p-1.5 hover:bg-red-50 rounded transition-colors group"
-                        title="Delete (Only initiator can delete)"
+                        title={currentUser.role?.toLowerCase() === "admin" ? "Delete (Admin)" : "Delete (Only initiator can delete)"}
                         onClick={() => handleDelete(ticket.id)}
                       >
                         <Trash2 className="w-4 h-4 text-red-400 group-hover:text-red-600" />
@@ -747,12 +861,220 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                   </div>
                 </td>
               </tr>
-            ))}
+
+              {/* Child Tickets - Rendered when expanded */}
+              {isExpanded && children.length > 0 && (
+                <>
+                  {children.map((childTicket) => (
+                    <tr
+                      key={childTicket.id}
+                      className={`hover:bg-surface transition-colors bg-gray-50/50 dark:bg-gray-800/50 ${
+                        childTicket.is_deleted ? "opacity-50" : ""
+                      }`}
+                    >
+                      {/* Empty cell for alignment */}
+                      <td className="px-3 py-2.5"></td>
+
+                      {/* Initiator Name and Group - Indented */}
+                      <td
+                        className="px-3 py-2.5 whitespace-nowrap cursor-pointer hover:text-primary pl-8"
+                        onClick={() => router.push(`/tickets/${childTicket.id}`)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 border-l-2 border-b-2 border-foreground-secondary/30"></div>
+                          <div>
+                            <div className="text-sm font-medium text-foreground">{childTicket.creator_name || "Unknown"}</div>
+                            <div className="text-xs text-foreground-secondary">{childTicket.group_name || "No Group"}</div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Date */}
+                      <td
+                        className="px-3 py-2.5 whitespace-nowrap cursor-pointer hover:text-primary"
+                        onClick={() => router.push(`/tickets/${childTicket.id}`)}
+                      >
+                        <div className="text-sm text-foreground">{format(new Date(childTicket.created_at), "dd MMM yyyy")}</div>
+                        <div className="text-xs text-foreground-secondary">{format(new Date(childTicket.created_at), "hh:mm a")}</div>
+                      </td>
+
+                      {/* Type + Row Number */}
+                      <td
+                        className="px-3 py-2.5 whitespace-nowrap cursor-pointer"
+                        onClick={() => router.push(`/tickets/${childTicket.id}`)}
+                      >
+                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                          childTicket.ticket_type === "requirement"
+                            ? "bg-purple-100 text-purple-700"
+                            : "bg-blue-100 text-blue-700"
+                        }`}>
+                          {childTicket.ticket_type === "requirement" ? "Requirement" : "Support"}
+                        </span>
+                        <div className="text-xs text-foreground-secondary mt-0.5">#{childTicket.ticket_number}</div>
+                      </td>
+
+                      {/* Title/Category */}
+                      <td
+                        className="px-3 py-2.5 cursor-pointer hover:text-primary"
+                        onClick={() => router.push(`/tickets/${childTicket.id}`)}
+                      >
+                        {childTicket.ticket_type === "requirement" ? (
+                          <div className="text-sm font-medium text-foreground">{childTicket.title || "Untitled"}</div>
+                        ) : (
+                          <>
+                            <div className="text-sm font-medium text-foreground">{childTicket.category_name || "N/A"}</div>
+                            {childTicket.subcategory_name && (
+                              <div className="text-xs text-foreground-secondary max-w-[150px] truncate" title={childTicket.subcategory_name}>
+                                {childTicket.subcategory_name}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </td>
+
+                      {/* Project */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {childTicket.ticket_type === "support" ? (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        ) : childTicket.project_name ? (
+                          <div className="text-sm text-foreground">{childTicket.project_name}</div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </td>
+
+                      {/* Description */}
+                      <td className="px-3 py-2.5">
+                        <p className="text-sm text-foreground line-clamp-2 max-w-[200px]" title={childTicket.description}>
+                          {childTicket.description || "No description"}
+                        </p>
+                      </td>
+
+                      {/* SPOC */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <span className="text-sm text-foreground">{childTicket.spoc_name || "-"}</span>
+                      </td>
+
+                      {/* Target Business Group (Internal Tickets Only) */}
+                      {filters?.isInternal && (
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <span className="text-sm text-foreground">{childTicket.group_name || "-"}</span>
+                        </td>
+                      )}
+
+                      {/* Assignee */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {canEditAssignee(childTicket) ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openAssigneeModal(childTicket)
+                            }}
+                            className="text-sm text-foreground hover:text-primary flex items-center gap-1"
+                          >
+                            {childTicket.assignee_name || "Unassigned"}
+                            <UserPlus className="w-3 h-3" />
+                          </button>
+                        ) : (
+                          <span className="text-sm text-foreground">{childTicket.assignee_name || "Unassigned"}</span>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {canEditStatus(childTicket) ? (
+                          <select
+                            value={childTicket.status}
+                            onChange={(e) => handleStatusChange(childTicket.id, e.target.value as Ticket["status"])}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`text-xs font-medium px-2 py-1 rounded border-0 focus:ring-2 focus:ring-primary ${
+                              statusColor[childTicket.status] || "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {getAvailableStatusOptions(childTicket).map((status) => (
+                              <option key={status} value={status}>
+                                {status.charAt(0).toUpperCase() + status.slice(1).replace("-", " ")}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor[childTicket.status] || "bg-gray-100 text-gray-700"}`}>
+                            {childTicket.status.charAt(0).toUpperCase() + childTicket.status.slice(1).replace("-", " ")}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Files */}
+                      <td className="px-3 py-2.5 text-center">
+                        {childTicket.attachment_count > 0 ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleAttachmentsDropdown(childTicket.id)
+                            }}
+                            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                          >
+                            <Paperclip className="w-3 h-3" />
+                            {childTicket.attachment_count}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center justify-center gap-0.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              router.push(`/tickets/${childTicket.id}`)
+                            }}
+                            className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
+                            title="View"
+                          >
+                            <Eye className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
+                          </button>
+                          {canEditTicket(childTicket) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                router.push(`/tickets/${childTicket.id}/edit`)
+                              }}
+                              className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
+                              title="Edit"
+                            >
+                              <Edit className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
+                            </button>
+                          )}
+                          {!childTicket.is_deleted && 
+                           currentUser && 
+                           (childTicket.created_by === currentUser.id || currentUser.role?.toLowerCase() === "admin") && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDelete(childTicket.id)
+                              }}
+                              className="p-1.5 hover:bg-red-50 rounded transition-colors group"
+                              title={currentUser.role?.toLowerCase() === "admin" ? "Delete (Admin)" : "Delete (Only initiator can delete)"}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-400 group-hover:text-red-600" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              )}
+                  </React.Fragment>
+                )
+              })}
           </tbody>
         </table>
       </div>
 
-      <div className="px-6 py-4 border-t border-border flex items-center justify-between bg-surface/50">
+      <div className="px-6 py-4 border-t border-border flex items-center justify-between bg-surface/50 dark:bg-gray-700/50">
         <p className="text-sm text-foreground-secondary">
           Showing {tickets.length} ticket{tickets.length !== 1 ? "s" : ""}
         </p>

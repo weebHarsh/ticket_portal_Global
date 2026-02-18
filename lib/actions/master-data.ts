@@ -285,6 +285,46 @@ export async function getTicketClassificationMappings() {
   }
 }
 
+/**
+ * Get SPOC user ID for a business unit group from ticket_classification_mapping
+ * Returns the most common SPOC for the group, or the first one found
+ */
+export async function getSpocForBusinessUnitGroup(businessUnitGroupId: number) {
+  try {
+    const result = await sql`
+      SELECT 
+        tcm.spoc_user_id,
+        u.id,
+        u.full_name,
+        u.email,
+        COUNT(*) as mapping_count
+      FROM ticket_classification_mapping tcm
+      LEFT JOIN users u ON tcm.spoc_user_id = u.id
+      WHERE tcm.business_unit_group_id = ${businessUnitGroupId}
+        AND tcm.spoc_user_id IS NOT NULL
+      GROUP BY tcm.spoc_user_id, u.id, u.full_name, u.email
+      ORDER BY mapping_count DESC, u.id ASC
+      LIMIT 1
+    `
+    
+    if (result.length > 0 && result[0].spoc_user_id) {
+      return {
+        success: true,
+        data: {
+          id: result[0].spoc_user_id,
+          full_name: result[0].full_name,
+          email: result[0].email,
+        },
+      }
+    }
+    
+    return { success: false, error: "No SPOC found for this business unit group", data: null }
+  } catch (error) {
+    console.error("Error fetching SPOC for business unit group:", error)
+    return { success: false, error: "Failed to fetch SPOC", data: null }
+  }
+}
+
 export async function createTicketClassificationMapping(
   businessUnitGroupId: number,
   categoryId: number,

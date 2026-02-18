@@ -47,6 +47,10 @@ export async function getTickets(filters?: {
   includeDeleted?: boolean
   myTeam?: boolean
   userId?: number
+  isInternal?: boolean
+  parentTicketId?: number | null
+  hasChildren?: boolean
+  targetBusinessGroup?: string
 }) {
   try {
     // Fetch all non-deleted tickets - filtering done client-side for flexibility
@@ -62,7 +66,10 @@ export async function getTickets(filters?: {
         p.name as project_name,
         closer.full_name as closed_by_name,
         holder.full_name as hold_by_name,
-        (SELECT COUNT(*) FROM attachments att WHERE att.ticket_id = t.id) as attachment_count
+        redirected_bug.name as redirected_from_group_name,
+        redirected_spoc.full_name as redirected_from_spoc_name,
+        (SELECT COUNT(*) FROM attachments att WHERE att.ticket_id = t.id) as attachment_count,
+        (SELECT COUNT(*) FROM tickets child WHERE child.parent_ticket_id = t.id AND (child.is_deleted IS NULL OR child.is_deleted = FALSE)) as child_ticket_count
       FROM tickets t
       LEFT JOIN users u ON t.created_by = u.id
       LEFT JOIN users a ON t.assigned_to = a.id
@@ -73,6 +80,8 @@ export async function getTickets(filters?: {
       LEFT JOIN projects p ON t.project_id = p.id
       LEFT JOIN users closer ON t.closed_by = closer.id
       LEFT JOIN users holder ON t.hold_by = holder.id
+      LEFT JOIN business_unit_groups redirected_bug ON t.redirected_from_business_unit_group_id = redirected_bug.id
+      LEFT JOIN users redirected_spoc ON t.redirected_from_spoc_user_id = redirected_spoc.id
       WHERE (t.is_deleted IS NULL OR t.is_deleted = FALSE)
       ORDER BY t.created_at DESC
     `
@@ -115,6 +124,37 @@ export async function getTickets(filters?: {
       filteredTickets = filteredTickets.filter(t => new Date(t.created_at) <= toDate)
     }
 
+    // Filter by internal vs customer tickets
+    if (filters?.isInternal !== undefined) {
+      filteredTickets = filteredTickets.filter(t => t.is_internal === filters.isInternal)
+    }
+
+    // Filter by parent ticket (for sub-tickets)
+    if (filters?.parentTicketId !== undefined) {
+      if (filters.parentTicketId === null) {
+        // Only parent tickets (no parent)
+        filteredTickets = filteredTickets.filter(t => !t.parent_ticket_id)
+      } else {
+        // Only sub-tickets of specific parent
+        filteredTickets = filteredTickets.filter(t => t.parent_ticket_id === filters.parentTicketId)
+      }
+    }
+
+    // Filter tickets that have children
+    if (filters?.hasChildren === true) {
+      const parentTicketIds = new Set(
+        filteredTickets
+          .filter(t => t.parent_ticket_id)
+          .map(t => t.parent_ticket_id)
+      )
+      filteredTickets = filteredTickets.filter(t => parentTicketIds.has(t.id))
+    }
+
+    // Filter by target business group (for internal tickets)
+    if (filters?.targetBusinessGroup) {
+      filteredTickets = filteredTickets.filter(t => t.group_name === filters.targetBusinessGroup)
+    }
+
     return { success: true, data: filteredTickets }
   } catch (error) {
     console.error("[v0] Error fetching tickets:", error)
@@ -135,10 +175,15 @@ export async function getTicketById(id: number) {
         u.email as creator_email,
         a.full_name as assignee_name,
         a.email as assignee_email,
+        spoc.full_name as spoc_name,
+        spoc.email as spoc_email,
+        bug.name as group_name,
         c.full_name as closed_by_name
       FROM tickets t
       LEFT JOIN users u ON t.created_by = u.id
       LEFT JOIN users a ON t.assigned_to = a.id
+      LEFT JOIN users spoc ON t.spoc_user_id = spoc.id
+      LEFT JOIN business_unit_groups bug ON t.business_unit_group_id = bug.id
       LEFT JOIN users c ON t.closed_by = c.id
       WHERE t.id = ${id}
     `
@@ -192,6 +237,8 @@ export async function createTicket(data: {
   spocId: number
   productReleaseName?: string
   estimatedReleaseDate?: string | null
+  isInternal?: boolean
+  parentTicketId?: number | null
 }) {
   try {
     const currentUser = await getCurrentUser()
@@ -214,7 +261,8 @@ export async function createTicket(data: {
         ticket_id, ticket_number, title, description, ticket_type, priority,
         status, created_by, assigned_to, spoc_user_id,
         business_unit_group_id, project_name, project_id, category_id, subcategory_id,
-        estimated_duration, product_release_name, estimated_release_date
+        estimated_duration, product_release_name, estimated_release_date,
+        is_internal, parent_ticket_id
       )
       VALUES (
         ${ticketId},
@@ -234,7 +282,9 @@ export async function createTicket(data: {
         ${data.subcategoryId || null},
         ${data.estimatedDuration || null},
         ${data.productReleaseName || null},
-        ${data.estimatedReleaseDate || null}
+        ${data.estimatedReleaseDate || null},
+        ${data.isInternal || false},
+        ${data.parentTicketId || null}
       )
       RETURNING *
     `
@@ -318,15 +368,40 @@ export async function updateTicketStatus(ticketId: number, status: string) {
     const isAssignee = userId === ticket.assigned_to
     const isSPOC = userId === ticket.spoc_user_id
 
-    // Validate permissions based on status
+    // Validate permissions based on status per permissions matrix
     if (!isAdmin) {
       if (status === "closed" || status === "deleted") {
+        // 2. Close / Delete Ticket: Initiator ✅ (with remarks) | SPOC ❌ | Assignee ❌
         if (!isInitiator) {
           return { success: false, error: "Only the ticket initiator can close or delete tickets" }
         }
-      } else if (status === "on-hold" || status === "resolved" || status === "returned") {
-        if (!isAssignee && !isSPOC) {
-          return { success: false, error: "Only the assignee or SPOC can set status to " + status }
+      } else if (status === "on-hold") {
+        // 6. Change Status to On-Hold: Initiator ❌ | SPOC ✅ | Assignee ❌
+        if (!isSPOC) {
+          return { success: false, error: "Only the SPOC can set status to on-hold" }
+        }
+      } else if (status === "resolved") {
+        // 7. Update Status to Resolved: Initiator ❌ | SPOC ❌ | Assignee ✅ (with remarks)
+        if (!isAssignee) {
+          return { success: false, error: "Only the assignee can set status to resolved" }
+        }
+      } else if (status === "returned") {
+        // Returned: Typically assignee only (similar to resolved)
+        if (!isAssignee) {
+          return { success: false, error: "Only the assignee can set status to returned" }
+        }
+      } else if (status === "open") {
+        // 3. Reopen Resolved Ticket: Initiator ✅ (with remarks) | SPOC ❌ | Assignee ✅
+        // Allow reopening if ticket was resolved or closed
+        if (oldStatus === "resolved" || oldStatus === "closed") {
+          if (!isInitiator && !isAssignee) {
+            return { success: false, error: "Only the initiator or assignee can reopen a resolved/closed ticket" }
+          }
+        } else {
+          // For other status changes to open, check if user has permission
+          if (!isInitiator && !isAssignee && !isSPOC) {
+            return { success: false, error: "You do not have permission to change status to open" }
+          }
         }
       }
     }
@@ -477,11 +552,13 @@ export async function updateTicket(
 
 export async function softDeleteTicket(ticketId: number) {
   try {
-    // Get current user to verify they are the ticket creator
+    // Get current user to verify they are the ticket creator or admin
     const currentUser = await getCurrentUser()
     if (!currentUser) {
       return { success: false, error: "User not authenticated" }
     }
+
+    const isAdmin = currentUser.role?.toLowerCase() === "admin"
 
     // Check if user is the ticket creator and get current status
     const ticket = await sql`
@@ -492,8 +569,9 @@ export async function softDeleteTicket(ticketId: number) {
       return { success: false, error: "Ticket not found" }
     }
 
-    if (ticket[0].created_by !== currentUser.id) {
-      return { success: false, error: "Only the ticket initiator can delete this ticket" }
+    // Allow deletion if user is admin OR the ticket creator
+    if (!isAdmin && ticket[0].created_by !== currentUser.id) {
+      return { success: false, error: "Only the ticket initiator or admin can delete this ticket" }
     }
 
     // Virtual delete: set is_deleted flag and status to 'deleted'
@@ -506,6 +584,7 @@ export async function softDeleteTicket(ticketId: number) {
     `
 
     // Log deletion to audit trail
+    const deletionNote = isAdmin ? 'Ticket deleted by admin' : 'Ticket deleted by initiator'
     await addAuditLog({
       ticketId,
       actionType: 'status_change',
@@ -513,7 +592,7 @@ export async function softDeleteTicket(ticketId: number) {
       newValue: 'deleted',
       performedBy: currentUser.id,
       performedByName: currentUser.full_name || currentUser.email,
-      notes: 'Ticket deleted by initiator'
+      notes: deletionNote
     })
 
     revalidatePath("/tickets")
@@ -541,6 +620,91 @@ export async function restoreTicket(ticketId: number) {
   } catch (error) {
     console.error("[v0] Error restoring ticket:", error)
     return { success: false, error: "Failed to restore ticket" }
+  }
+}
+
+export async function redirectTicket(
+  ticketId: number,
+  newBusinessUnitGroupId: number,
+  newSpocUserId: number,
+  remarks: string
+) {
+  try {
+    const currentUser = await getCurrentUser()
+    if (!currentUser) {
+      return { success: false, error: "User not authenticated" }
+    }
+
+    // Get ticket info before update
+    const ticketBefore = await sql`
+      SELECT 
+        t.*,
+        bug.name as current_group_name,
+        spoc.full_name as current_spoc_name
+      FROM tickets t
+      LEFT JOIN business_unit_groups bug ON t.business_unit_group_id = bug.id
+      LEFT JOIN users spoc ON t.spoc_user_id = spoc.id
+      WHERE t.id = ${ticketId}
+    `
+
+    if (ticketBefore.length === 0) {
+      return { success: false, error: "Ticket not found" }
+    }
+
+    const ticket = ticketBefore[0]
+    const isAdmin = currentUser.role?.toLowerCase() === "admin"
+    const isSPOC = currentUser.id === ticket.spoc_user_id
+
+    // Check permissions per permissions matrix:
+    // 5. Redirect to another SPOC: Initiator ❌ | SPOC ✅ (with remarks) | Assignee ❌
+    if (!isAdmin && !isSPOC) {
+      return { success: false, error: "Only SPOC can redirect tickets" }
+    }
+
+    // Get new group and SPOC names for audit trail
+    const newGroupResult = await sql`
+      SELECT name FROM business_unit_groups WHERE id = ${newBusinessUnitGroupId}
+    `
+    const newSpocResult = await sql`
+      SELECT full_name FROM users WHERE id = ${newSpocUserId}
+    `
+
+    const newGroupName = newGroupResult[0]?.name || "Unknown Group"
+    const newSpocName = newSpocResult[0]?.full_name || "Unknown SPOC"
+
+    // Update ticket with redirection
+    await sql`
+      UPDATE tickets
+      SET 
+        business_unit_group_id = ${newBusinessUnitGroupId},
+        spoc_user_id = ${newSpocUserId},
+        redirected_from_business_unit_group_id = ${ticket.business_unit_group_id},
+        redirected_from_spoc_user_id = ${ticket.spoc_user_id},
+        redirection_remarks = ${remarks},
+        redirected_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${ticketId}
+    `
+
+    // Log redirection to audit trail
+    await addAuditLog({
+      ticketId,
+      actionType: 'redirection',
+      oldValue: `${ticket.current_group_name || 'Unknown'} (${ticket.current_spoc_name || 'Unknown SPOC'})`,
+      newValue: `${newGroupName} (${newSpocName})`,
+      performedBy: currentUser.id,
+      performedByName: currentUser.full_name || currentUser.email,
+      notes: `Redirected: ${remarks}`
+    })
+
+    revalidatePath("/tickets")
+    revalidatePath(`/tickets/${ticketId}`)
+    revalidatePath("/dashboard")
+
+    return { success: true }
+  } catch (error) {
+    console.error("[v0] Error redirecting ticket:", error)
+    return { success: false, error: "Failed to redirect ticket" }
   }
 }
 

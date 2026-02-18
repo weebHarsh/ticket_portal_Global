@@ -74,7 +74,7 @@ export default function ProjectModal({
       />
 
       {/* Modal */}
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+      <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div>
@@ -85,7 +85,7 @@ export default function ProjectModal({
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-surface rounded-lg transition-colors"
+            className="p-2 hover:bg-surface dark:hover:bg-gray-700 rounded-lg transition-colors"
           >
             <X className="w-5 h-5 text-muted-foreground" />
           </button>
@@ -100,7 +100,7 @@ export default function ProjectModal({
               placeholder="Search projects..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg bg-white text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg bg-white dark:bg-gray-700 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm"
               autoFocus
             />
           </div>
@@ -125,8 +125,8 @@ export default function ProjectModal({
                   onClick={() => setSelectedProjectId(project.id)}
                   className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left ${
                     selectedProjectId === project.id
-                      ? "bg-primary/10 border-2 border-primary"
-                      : "hover:bg-surface border-2 border-transparent"
+                      ? "bg-primary/10 dark:bg-primary/20 border-2 border-primary"
+                      : "hover:bg-surface dark:hover:bg-gray-700 border-2 border-transparent"
                   }`}
                 >
                   <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-full flex items-center justify-center text-white font-medium text-sm">
@@ -153,7 +153,7 @@ export default function ProjectModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between p-4 border-t border-border bg-surface/50">
+        <div className="flex items-center justify-between p-4 border-t border-border bg-surface/50 dark:bg-gray-700/50">
           <button
             onClick={handleRemoveProject}
             className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
@@ -163,7 +163,7 @@ export default function ProjectModal({
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-foreground border border-border rounded-lg hover:bg-surface transition-colors"
+              className="px-4 py-2 text-sm font-medium text-foreground border border-border rounded-lg hover:bg-surface dark:hover:bg-gray-700 transition-colors"
             >
               Cancel
             </button>

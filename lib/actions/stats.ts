@@ -204,3 +204,49 @@ export async function getAnalyticsData() {
     }
   }
 }
+
+export async function getDelayedTickets() {
+  try {
+    // Find tickets where actual duration exceeds estimated duration from ticket_classification_mapping
+    const result = await sql`
+      SELECT
+        t.id,
+        t.ticket_id,
+        t.ticket_number,
+        t.title,
+        t.created_at,
+        t.estimated_duration as ticket_estimated_duration,
+        tcm.estimated_duration as mapping_estimated_duration_minutes,
+        a.full_name as assignee_name,
+        a.email as assignee_email,
+        bug.name as target_group_name,
+        c.name as category_name,
+        sc.name as subcategory_name,
+        t.status,
+        -- Calculate actual duration in minutes
+        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - t.created_at)) / 60 as actual_duration_minutes,
+        -- Calculate days delayed (actual - estimated)
+        (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - t.created_at)) / 60 - COALESCE(tcm.estimated_duration, 0)) / (24 * 60) as days_delayed
+      FROM tickets t
+      LEFT JOIN ticket_classification_mapping tcm 
+        ON t.business_unit_group_id = tcm.business_unit_group_id
+        AND t.category_id = tcm.category_id
+        AND t.subcategory_id = tcm.subcategory_id
+      LEFT JOIN users a ON t.assigned_to = a.id
+      LEFT JOIN business_unit_groups bug ON t.business_unit_group_id = bug.id
+      LEFT JOIN categories c ON t.category_id = c.id
+      LEFT JOIN subcategories sc ON t.subcategory_id = sc.id
+      WHERE (t.is_deleted IS NULL OR t.is_deleted = FALSE)
+        AND t.status NOT IN ('closed', 'deleted')
+        AND tcm.estimated_duration IS NOT NULL
+        -- Only show tickets where actual duration exceeds estimated
+        AND EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - t.created_at)) / 60 > tcm.estimated_duration
+      ORDER BY days_delayed DESC, t.created_at DESC
+    `
+
+    return { success: true, data: result }
+  } catch (error) {
+    console.error("[v0] Error fetching delayed tickets:", error)
+    return { success: false, error: "Failed to fetch delayed tickets", data: [] }
+  }
+}

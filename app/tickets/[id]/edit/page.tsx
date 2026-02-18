@@ -4,8 +4,9 @@ import type React from "react"
 
 import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import DashboardLayout from "@/components/layout/dashboard-layout"
-import { ArrowLeft, Save, Paperclip, Download, Trash2, FileText, Plus, X, Upload } from "lucide-react"
+import { ArrowLeft, Save, Paperclip, Download, Trash2, FileText, Plus, X, Upload, AlertCircle } from "lucide-react"
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 import { getTicketById } from "@/lib/actions/tickets"
@@ -17,10 +18,13 @@ import { updateTicket } from "@/lib/actions/tickets"
 export default function EditTicketPage() {
   const params = useParams()
   const router = useRouter()
+  const { data: session, status: sessionStatus } = useSession()
   const ticketId = params.id as string
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [originalTicket, setOriginalTicket] = useState<any>(null)
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -42,6 +46,29 @@ export default function EditTicketPage() {
   const [uploadError, setUploadError] = useState("")
   const [uploading, setUploading] = useState(false)
 
+  // Load current user from session or localStorage
+  useEffect(() => {
+    try {
+      // Prioritize NextAuth session data (for SSO users)
+      if (sessionStatus === "authenticated" && session?.user) {
+        setCurrentUser({
+          id: parseInt(session.user.id || "0"),
+          email: session.user.email || "",
+          full_name: session.user.name || "",
+          role: session.user.role || "user",
+        })
+      } else {
+        // Fallback to localStorage for email/password users
+        const userData = localStorage.getItem("user")
+        if (userData) {
+          setCurrentUser(JSON.parse(userData))
+        }
+      }
+    } catch (error) {
+      console.error("Failed to parse user data:", error)
+    }
+  }, [sessionStatus, session])
+
   useEffect(() => {
     loadData()
   }, [ticketId])
@@ -55,8 +82,9 @@ export default function EditTicketPage() {
       getUsers(),
     ])
 
-    if (ticketResult.success) {
-      const ticket = ticketResult.data
+    if (ticketResult.success && ticketResult.data) {
+      const ticket = ticketResult.data as any
+      setOriginalTicket(ticket) // Store original ticket for permission checks
       setFormData({
         title: ticket.title || "",
         description: ticket.description || "",
@@ -180,8 +208,49 @@ export default function EditTicketPage() {
     }
   }
 
+  // Permission checks
+  const isAdmin = currentUser?.role?.toLowerCase() === "admin"
+  const isInitiator = currentUser && originalTicket && currentUser.id === originalTicket.created_by
+  const isAssignee = currentUser && originalTicket && currentUser.id === originalTicket.assigned_to
+  const isSPOC = currentUser && originalTicket && currentUser.id === originalTicket.spoc_user_id
+  const isResolvedOrClosed = originalTicket && (originalTicket.status === "resolved" || originalTicket.status === "closed")
+  const isResolved = originalTicket && originalTicket.status === "resolved"
+
+  // If ticket is resolved or closed, only admin can edit (except for reopening)
+  const canEditAtAll = isAdmin || !isResolvedOrClosed || (isResolved && (isInitiator || isAssignee))
+
+  // Field-level permissions per permissions matrix:
+  // 1. Edit All Fields: Initiator ✅ | SPOC ❌ | Assignee ❌
+  const canEditTitle = canEditAtAll && (isAdmin || isInitiator)
+  const canEditDescription = canEditAtAll && (isAdmin || isInitiator) // Removed assignee - only initiator can edit
+  const canEditPriority = canEditAtAll && isAdmin
+  const canEditBusinessUnitGroup = canEditAtAll && isAdmin
+  const canEditCategory = canEditAtAll && isAdmin
+  const canEditSubcategory = canEditAtAll && isAdmin
+  const canEditEstimatedDuration = canEditAtAll && isAdmin
+  
+  // 4. Assign / Reselect Assignee: Initiator ❌ | SPOC ✅ | Assignee ❌
+  const canEditAssignee = canEditAtAll && (isAdmin || isSPOC)
+  
+  // Status edit permissions:
+  // 6. Change Status to On-Hold: Initiator ❌ | SPOC ✅ | Assignee ❌
+  // 7. Update Status to Resolved: Initiator ❌ | SPOC ❌ | Assignee ✅
+  // 3. Reopen Resolved Ticket: Initiator ✅ | SPOC ❌ | Assignee ✅
+  // Note: Status changes are handled in updateTicketStatus() function, but we need to restrict the dropdown
+  const canEditStatus = canEditAtAll && (isAdmin || isSPOC || isAssignee)
+  
+  // Attachments: Initiator, Assignee, and SPOC can manage (keeping current logic)
+  const canEditAttachments = canEditAtAll && (isAdmin || isInitiator || isAssignee || isSPOC)
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Double-check permissions before submitting
+    if (!canEditAtAll) {
+      alert("You do not have permission to edit this ticket.")
+      return
+    }
+
     setSaving(true)
 
     // Upload new files first
@@ -222,6 +291,33 @@ export default function EditTicketPage() {
     )
   }
 
+  // Show access denied message if user can't edit at all
+  if (!canEditAtAll) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-4xl">
+          <div className="flex items-center gap-4 mb-6">
+            <button onClick={() => router.back()} className="p-2 hover:bg-surface dark:hover:bg-gray-700 rounded-lg transition-colors">
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h1 className="text-2xl font-poppins font-bold text-foreground">Edit Ticket</h1>
+          </div>
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">Access Restricted</h3>
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  This ticket is {originalTicket?.status} and can only be edited by administrators.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
   return (
     <DashboardLayout>
       <div className="max-w-4xl">
@@ -232,8 +328,21 @@ export default function EditTicketPage() {
           <h1 className="text-2xl font-poppins font-bold text-foreground">Edit Ticket</h1>
         </div>
 
+        {/* Permission Info Banner */}
+        {!isAdmin && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-blue-700 dark:text-blue-300">
+                {isInitiator && "As the initiator, you can only edit the Title and Description."}
+                {isAssignee && !isInitiator && "As the assignee, you can only edit the Status and Description."}
+              </p>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="bg-white border border-border rounded-xl p-6 space-y-4">
+          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
             <h3 className="font-poppins font-semibold text-foreground">Basic Information</h3>
 
             <div>
@@ -243,7 +352,8 @@ export default function EditTicketPage() {
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 required
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                disabled={!canEditTitle}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -253,7 +363,8 @@ export default function EditTicketPage() {
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 rows={5}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm resize-none"
+                disabled={!canEditDescription}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm resize-none disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -264,11 +375,14 @@ export default function EditTicketPage() {
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                   required
-                  className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                  disabled={!canEditStatus}
+                  className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="open">Open</option>
-                  <option value="hold">On Hold</option>
+                  <option value="on-hold">On Hold</option>
+                  <option value="resolved">Resolved</option>
                   <option value="closed">Closed</option>
+                  <option value="returned">Returned</option>
                 </select>
               </div>
 
@@ -278,7 +392,8 @@ export default function EditTicketPage() {
                   value={formData.priority}
                   onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                   required
-                  className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                  disabled={!canEditPriority}
+                  className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -289,7 +404,7 @@ export default function EditTicketPage() {
             </div>
           </div>
 
-          <div className="bg-white border border-border rounded-xl p-6 space-y-4">
+          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
             <h3 className="font-poppins font-semibold text-foreground">Classification</h3>
 
             <div>
@@ -298,7 +413,8 @@ export default function EditTicketPage() {
                 value={formData.businessUnitGroupId}
                 onChange={(e) => setFormData({ ...formData, businessUnitGroupId: e.target.value })}
                 required
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                disabled={!canEditBusinessUnitGroup}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select...</option>
                 {businessUnitGroups.map((bu) => (
@@ -315,7 +431,8 @@ export default function EditTicketPage() {
                 value={formData.categoryId}
                 onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
                 required
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                disabled={!canEditCategory}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select...</option>
                 {categories.map((cat) => (
@@ -332,8 +449,8 @@ export default function EditTicketPage() {
                 value={formData.subcategoryId}
                 onChange={(e) => setFormData({ ...formData, subcategoryId: e.target.value })}
                 required
-                disabled={!formData.categoryId}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50"
+                disabled={!canEditSubcategory || !formData.categoryId}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select...</option>
                 {subcategories.map((sub) => (
@@ -345,7 +462,7 @@ export default function EditTicketPage() {
             </div>
           </div>
 
-          <div className="bg-white border border-border rounded-xl p-6 space-y-4">
+          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
             <h3 className="font-poppins font-semibold text-foreground">Assignment</h3>
 
             <div>
@@ -354,7 +471,8 @@ export default function EditTicketPage() {
                 value={formData.assigneeId}
                 onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })}
                 required
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                disabled={!canEditAssignee}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select...</option>
                 {users.map((user) => (
@@ -371,13 +489,14 @@ export default function EditTicketPage() {
                 type="text"
                 value={formData.estimatedDuration}
                 onChange={(e) => setFormData({ ...formData, estimatedDuration: e.target.value })}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                disabled={!canEditEstimatedDuration}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
           </div>
 
           {/* Attachments Section */}
-          <div className="bg-white border border-border rounded-xl p-6 space-y-4">
+          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-poppins font-semibold text-foreground flex items-center gap-2">
                 <Paperclip className="w-5 h-5" />
@@ -386,7 +505,7 @@ export default function EditTicketPage() {
             </div>
 
             {uploadError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
                 {uploadError}
               </div>
             )}
@@ -398,7 +517,7 @@ export default function EditTicketPage() {
                 {attachments.map((attachment: any) => (
                   <div
                     key={attachment.id}
-                    className="flex items-center justify-between p-3 border border-border rounded-lg hover:bg-surface transition-colors"
+                    className="flex items-center justify-between p-3 border border-border rounded-lg hover:bg-surface dark:hover:bg-gray-700 transition-colors"
                   >
                     <div className="flex items-center gap-3">
                       <FileText className="w-5 h-5 text-muted-foreground" />
@@ -417,7 +536,7 @@ export default function EditTicketPage() {
                           download={attachment.file_name}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 dark:hover:bg-primary/20 rounded-lg transition-colors"
                         >
                           <Download className="w-4 h-4" />
                         </a>
@@ -425,7 +544,8 @@ export default function EditTicketPage() {
                       <button
                         type="button"
                         onClick={() => deleteAttachment(attachment.id)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        disabled={!canEditAttachments}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -442,7 +562,7 @@ export default function EditTicketPage() {
                 {newFiles.map((file, idx) => (
                   <div
                     key={idx}
-                    className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg"
                   >
                     <div className="flex items-center gap-3">
                       <Upload className="w-5 h-5 text-blue-500" />
@@ -456,7 +576,7 @@ export default function EditTicketPage() {
                     <button
                       type="button"
                       onClick={() => removeNewFile(idx)}
-                      className="p-1.5 hover:bg-red-50 rounded transition-colors"
+                      className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                     >
                       <X className="w-4 h-4 text-red-500" />
                     </button>
@@ -466,13 +586,23 @@ export default function EditTicketPage() {
             )}
 
             {/* Upload New Files */}
-            <label className="flex items-center justify-center w-full px-4 py-4 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary transition-colors">
+            <label className={`flex items-center justify-center w-full px-4 py-4 border-2 border-dashed border-border rounded-lg transition-colors ${
+              canEditAttachments 
+                ? "cursor-pointer hover:border-primary dark:hover:border-primary" 
+                : "opacity-50 cursor-not-allowed"
+            }`}>
               <div className="text-center">
                 <Plus className="w-5 h-5 text-foreground-secondary mx-auto mb-1" />
                 <span className="text-sm font-medium text-foreground">Add attachments</span>
                 <p className="text-xs text-foreground-secondary">Max 5MB per file</p>
               </div>
-              <input type="file" multiple onChange={handleFileChange} className="hidden" />
+              <input 
+                type="file" 
+                multiple 
+                onChange={handleFileChange} 
+                disabled={!canEditAttachments}
+                className="hidden" 
+              />
             </label>
           </div>
 

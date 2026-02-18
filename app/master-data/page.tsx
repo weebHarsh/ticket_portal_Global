@@ -37,7 +37,7 @@ export default function MasterDataPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 bg-card dark:bg-gray-800 p-4 shadow-lg rounded-md border border-border">
         <div>
           <h1 className="text-3xl font-poppins font-bold text-foreground">
             Master Data Management

@@ -50,17 +50,17 @@ export default function AnalyticsCharts() {
     <div className="space-y-6">
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <p className="text-sm text-foreground-secondary mb-2">Avg Resolution Time</p>
           <p className="text-3xl font-poppins font-bold text-foreground">{data.avgResolutionTime}h</p>
         </div>
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <p className="text-sm text-foreground-secondary mb-2">Total Tickets (30 days)</p>
           <p className="text-3xl font-poppins font-bold text-foreground">
             {data.ticketTrend.reduce((sum: number, item: any) => sum + Number(item.count), 0)}
           </p>
         </div>
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <p className="text-sm text-foreground-secondary mb-2">Active Business Units</p>
           <p className="text-3xl font-poppins font-bold text-foreground">{data.ticketsByBU.length}</p>
         </div>
@@ -69,12 +69,12 @@ export default function AnalyticsCharts() {
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Tickets by Business Unit */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Tickets by Business Unit</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.ticketsByBU}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="business_unit" angle={-45} textAnchor="end" height={100} />
+              <XAxis dataKey="business_unit" textAnchor="end" height={100} />
               <YAxis />
               <Tooltip />
               <Bar dataKey="ticket_count" fill="#530093" />
@@ -83,7 +83,7 @@ export default function AnalyticsCharts() {
         </div>
 
         {/* Tickets by Category */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Tickets by Category</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.ticketsByCategory}>
@@ -97,7 +97,7 @@ export default function AnalyticsCharts() {
         </div>
 
         {/* Tickets by Subcategory (Top 10) */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Top 10 Subcategories</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.ticketsBySubcategory} layout="vertical">
@@ -111,7 +111,7 @@ export default function AnalyticsCharts() {
         </div>
 
         {/* Status Distribution */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Status Distribution</h3>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
@@ -136,7 +136,7 @@ export default function AnalyticsCharts() {
         </div>
 
         {/* Ticket Type Distribution */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Ticket Type Distribution</h3>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
@@ -161,7 +161,7 @@ export default function AnalyticsCharts() {
         </div>
 
         {/* Priority Distribution */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Priority Distribution</h3>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.ticketsByPriority}>
@@ -178,7 +178,7 @@ export default function AnalyticsCharts() {
       {/* Full Width Charts */}
       <div className="space-y-6">
         {/* Ticket Trend (Last 30 Days) */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Ticket Trend (Last 30 Days)</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={data.ticketTrend}>
@@ -193,12 +193,12 @@ export default function AnalyticsCharts() {
         </div>
 
         {/* Team Performance */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Team Performance (Top 10)</h3>
           <ResponsiveContainer width="100%" height={400}>
             <BarChart data={data.teamPerformance}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="assignee" angle={-45} textAnchor="end" height={120} />
+              <XAxis dataKey="assignee" textAnchor="end" height={120} />
               <YAxis />
               <Tooltip />
               <Legend />
@@ -210,12 +210,12 @@ export default function AnalyticsCharts() {
         </div>
 
         {/* Monthly Trend (Last 12 Months) */}
-        <div className="bg-white border border-border rounded-xl p-6">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
           <h3 className="font-poppins font-bold text-foreground mb-4">Monthly Ticket Trend (Last 12 Months)</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={data.ticketsByMonth}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" angle={-45} textAnchor="end" height={80} />
+              <XAxis dataKey="month"  textAnchor="end" height={80} />
               <YAxis />
               <Tooltip />
               <Legend />

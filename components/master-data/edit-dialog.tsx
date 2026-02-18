@@ -43,7 +43,7 @@ export default function EditDialog({ title, fields, initialData, onSave, onClose
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto border border-border">
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-poppins font-bold text-foreground">{title}</h3>
           <button onClick={onClose} className="text-foreground-secondary hover:text-foreground">
@@ -91,7 +91,7 @@ export default function EditDialog({ title, fields, initialData, onSave, onClose
                   required={field.required}
                   disabled={field.disabled}
                   className={`w-full px-4 py-2.5 border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm ${
-                    field.disabled ? "bg-gray-100 cursor-not-allowed" : "bg-background"
+                    field.disabled ? "bg-gray-100 dark:bg-gray-700 cursor-not-allowed" : "bg-background"
                   }`}
                 />
               )}

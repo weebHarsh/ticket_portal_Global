@@ -38,7 +38,7 @@ export default function AnalyticsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 bg-card dark:bg-gray-800 p-4 shadow-lg rounded-md border border-border">
         <AnalyticsHeader />
         <AnalyticsCharts />
       </div>

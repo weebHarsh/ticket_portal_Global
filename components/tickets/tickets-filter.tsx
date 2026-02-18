@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Search, Filter, Users, X, FileDown } from "lucide-react"
 import { getUsers } from "@/lib/actions/tickets"
+import { getBusinessUnitGroups } from "@/lib/actions/master-data"
 
 interface User {
   id: number
@@ -10,15 +11,23 @@ interface User {
   email: string
 }
 
+interface BusinessUnitGroup {
+  id: number
+  name: string
+  description: string | null
+}
+
 interface TicketsFilterProps {
   onFilterChange: (filters: any) => void
   onExport?: () => void
+  isInternal?: boolean
 }
 
-export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilterProps) {
+export default function TicketsFilter({ onFilterChange, onExport, isInternal = false }: TicketsFilterProps) {
   const [showFilters, setShowFilters] = useState(false)
   const [userId, setUserId] = useState<number | null>(null)
   const [users, setUsers] = useState<User[]>([])
+  const [businessUnitGroups, setBusinessUnitGroups] = useState<BusinessUnitGroup[]>([])
   const [filters, setFilters] = useState({
     status: "all",
     dateFrom: "",
@@ -28,6 +37,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
     type: "all",
     search: "",
     myTeam: false,
+    targetBusinessGroup: "",
   })
 
   useEffect(() => {
@@ -41,12 +51,33 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
       console.error("Failed to parse user data:", e)
     }
     loadUsers()
-  }, [])
+    if (isInternal) {
+      loadBusinessUnitGroups()
+    }
+  }, [isInternal])
 
   const loadUsers = async () => {
     const result = await getUsers()
     if (result.success && result.data) {
       setUsers(result.data as User[])
+    }
+  }
+
+  const loadBusinessUnitGroups = async () => {
+    const result = await getBusinessUnitGroups()
+    if (result.success && result.data) {
+      // Filter to only internal support groups
+      const internalGroups = (result.data as BusinessUnitGroup[]).filter((bu) =>
+        [
+          "Tech Support",
+          "DevOps Support",
+          "Integration Support",
+          "GUI Support",
+          "Central Team Support",
+          "Product Team Support",
+        ].includes(bu.name)
+      )
+      setBusinessUnitGroups(internalGroups)
     }
   }
 
@@ -67,6 +98,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
       type: "all",
       search: "",
       myTeam: false,
+      targetBusinessGroup: "",
     }
     setFilters(resetFilters)
     onFilterChange(resetFilters)
@@ -98,10 +130,11 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
     filters.spoc,
     filters.assignee,
     filters.myTeam,
+    filters.targetBusinessGroup,
   ].filter(Boolean).length
 
   return (
-    <div className="space-y-4 bg-card p-4 shadow-lg rounded-md w-full">
+    <div className="space-y-4 bg-card dark:bg-gray-800 p-4 shadow-lg rounded-md w-full border border-border">
       {/* Quick Actions Bar */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         {/* Universal Search */}
@@ -113,7 +146,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
               placeholder="Search tickets, descriptions, users, categories..."
               value={filters.search}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="w-full px-4 py-2.5 pl-10 border border-border rounded-lg bg-white text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+              className="w-full px-4 py-2.5 pl-10 border border-border rounded-lg bg-white dark:bg-gray-700 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
             />
             {filters.search && (
               <button
@@ -134,7 +167,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
         {onExport && (
           <button
             onClick={onExport}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap bg-white border border-border text-foreground hover:bg-surface"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap bg-white dark:bg-gray-700 border border-border text-foreground hover:bg-surface dark:hover:bg-gray-600"
           >
             <FileDown className="w-4 h-4" />
             Export
@@ -147,13 +180,13 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
             showFilters || activeFilterCount > 0
               ? "bg-primary text-white"
-              : "bg-white border border-border text-foreground hover:bg-surface"
+              : "bg-white dark:bg-gray-700 border border-border text-foreground hover:bg-surface dark:hover:bg-gray-600"
           }`}
         >
           <Filter className="w-4 h-4" />
           Filters
           {activeFilterCount > 0 && (
-            <span className="inline-flex items-center justify-center w-5 h-5 text-xs bg-white text-primary rounded-full">
+            <span className="inline-flex items-center justify-center w-5 h-5 text-xs bg-white dark:bg-gray-700 text-primary rounded-full">
               {activeFilterCount}
             </span>
           )}
@@ -165,7 +198,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
           className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
             filters.myTeam
               ? "bg-primary text-white"
-              : "bg-white border border-border text-foreground hover:bg-surface"
+              : "bg-white dark:bg-gray-700 border border-border text-foreground hover:bg-surface dark:hover:bg-gray-600"
           }`}
         >
           <Users className="w-4 h-4" />
@@ -175,7 +208,7 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
 
       {/* Expanded Filters */}
       {showFilters && (
-        <div className="bg-white border border-border rounded-xl p-6 space-y-4">
+        <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-8 gap-4">
             {/* Status */}
             <div>
@@ -261,6 +294,25 @@ export default function TicketsFilter({ onFilterChange, onExport }: TicketsFilte
                 ))}
               </select>
             </div>
+
+            {/* Target Business Group Filter (Internal Tickets Only) */}
+            {isInternal && (
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">Target Business Group</label>
+                <select
+                  value={filters.targetBusinessGroup}
+                  onChange={(e) => setFilters({ ...filters, targetBusinessGroup: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+                >
+                  <option value="">All Groups</option>
+                  {businessUnitGroups.map((bu) => (
+                    <option key={bu.id} value={bu.name}>
+                      {bu.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Reset All Button */}
             <div className="flex items-end">

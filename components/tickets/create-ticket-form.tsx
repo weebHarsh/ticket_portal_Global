@@ -12,10 +12,12 @@ import {
   getBusinessUnitGroups,
   getCategories,
   getSubcategories,
+  getSpocForBusinessUnitGroup,
 } from "@/lib/actions/master-data"
 import { Combobox } from "@/components/ui/combobox"
 
 interface FormData {
+  isInternal: boolean
   ticketType: "support" | "requirement"
   businessUnitGroupId: string
   projectId: string
@@ -35,7 +37,11 @@ export default function CreateTicketForm() {
   const searchParams = useSearchParams()
   const isDuplicate = searchParams.get("duplicate") === "true"
 
+  const parentTicketId = searchParams.get("parentTicketId")
+  const isSubTicket = !!parentTicketId
+
   const [formData, setFormData] = useState<FormData>({
+    isInternal: searchParams.get("isInternal") === "true",
     ticketType: (searchParams.get("ticketType") as "support" | "requirement") || "support",
     businessUnitGroupId: searchParams.get("businessUnitGroupId") || "",
     projectId: searchParams.get("projectId") || "",
@@ -75,12 +81,12 @@ export default function CreateTicketForm() {
     loadInitialData()
   }, [])
 
-  // Pre-select user's group when data is loaded
+  // Pre-select user's group when data is loaded (only for customer tickets)
   useEffect(() => {
-    if (userGroupId && !formData.businessUnitGroupId && !isDuplicate) {
+    if (userGroupId && !formData.businessUnitGroupId && !isDuplicate && !formData.isInternal) {
       setFormData((prev) => ({ ...prev, businessUnitGroupId: userGroupId }))
     }
-  }, [userGroupId, businessUnitGroups])
+  }, [userGroupId, businessUnitGroups, formData.isInternal])
 
   const loadInitialData = async () => {
     console.log("[v0] Loading initial data for create ticket form")
@@ -140,13 +146,18 @@ export default function CreateTicketForm() {
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const handleBusinessUnitChange = (value: string) => {
-    // Find the selected group to get SPOC
+  const handleBusinessUnitChange = async (value: string) => {
     const selectedGroup = businessUnitGroups.find((bu) => bu.id.toString() === value)
-
-    // Find matching SPOC user by full_name
     let spocId = ""
-    if (selectedGroup?.spoc_name) {
+
+    if (formData.isInternal && selectedGroup) {
+      // For internal tickets, get SPOC from ticket_classification_mapping
+      const spocResult = await getSpocForBusinessUnitGroup(Number(value))
+      if (spocResult.success && spocResult.data) {
+        spocId = spocResult.data.id.toString()
+      }
+    } else if (selectedGroup?.spoc_name) {
+      // For customer tickets, use existing logic (spoc_name from business_unit_groups)
       const spocUser = assignees.find(
         (user) => user.full_name?.toLowerCase() === selectedGroup.spoc_name?.toLowerCase()
       )
@@ -161,6 +172,17 @@ export default function CreateTicketForm() {
       categoryId: "",
       subcategoryId: "",
       spocId: spocId,
+    }))
+  }
+
+  const handleInternalToggle = (isInternal: boolean) => {
+    setFormData((prev) => ({
+      ...prev,
+      isInternal,
+      businessUnitGroupId: "", // Reset business group selection
+      categoryId: "",
+      subcategoryId: "",
+      spocId: "",
     }))
   }
 
@@ -275,6 +297,7 @@ export default function CreateTicketForm() {
 
       const result = await createTicket({
         ticketType: formData.ticketType,
+        parentTicketId: isSubTicket && parentTicketId ? Number(parentTicketId) : null,
         businessUnitGroupId: Number(formData.businessUnitGroupId),
         projectId: formData.projectId ? Number(formData.projectId) : null,
         categoryId: formData.categoryId ? Number(formData.categoryId) : null,
@@ -285,6 +308,7 @@ export default function CreateTicketForm() {
         spocId: Number(formData.spocId),
         productReleaseName: formData.productReleaseName,
         estimatedReleaseDate: formData.estimatedReleaseDate || null,
+        isInternal: formData.isInternal,
       })
 
       console.log("[v0] Create ticket result:", result)
@@ -294,7 +318,7 @@ export default function CreateTicketForm() {
       }
 
       // Upload attachments if any
-      if (formData.attachments.length > 0) {
+      if (formData.attachments.length > 0 && result.data) {
         const ticketId = result.data.id
         const userId = JSON.parse(localStorage.getItem("user") || "{}").id
         const failedUploads: string[] = []
@@ -324,7 +348,11 @@ export default function CreateTicketForm() {
 
       setSuccess(true)
       setTimeout(() => {
-        router.push(`/tickets?created=${result.data.ticket_id}`)
+        if (result.data) {
+          router.push(`/tickets?created=${result.data.ticket_id}`)
+        } else {
+          router.push("/tickets")
+        }
       }, 2000)
     } catch (err) {
       console.error("[v0] Error creating ticket:", err)
@@ -355,7 +383,34 @@ export default function CreateTicketForm() {
         </div>
       )}
 
-          {/* Ticket Type Selection */}
+      {/* Customer vs Internal Selection */}
+      <div className="bg-white border border-border rounded-xl p-6 shadow-lg dark:bg-gray-800 dark:border-gray-600 dark:shadow-lg">
+        <h3 className="font-poppins font-semibold text-foreground mb-4">Ticket Classification</h3>
+        <div className="flex gap-4">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="radio"
+              name="isInternal"
+              checked={!formData.isInternal}
+              onChange={() => handleInternalToggle(false)}
+              className="w-4 h-4"
+            />
+            <span className="text-foreground font-medium">Customer Ticket</span>
+          </label>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="radio"
+              name="isInternal"
+              checked={formData.isInternal}
+              onChange={() => handleInternalToggle(true)}
+              className="w-4 h-4"
+            />
+            <span className="text-foreground font-medium">Internal Ticket</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Ticket Type Selection (Issue vs Requirement) */}
       <div className="bg-white border border-border rounded-xl p-6 shadow-lg dark:bg-gray-800 dark:border-gray-600 dark:shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground mb-4">Ticket Type</h3>
         <div className="flex gap-4">
@@ -370,7 +425,7 @@ export default function CreateTicketForm() {
                 className="w-4 h-4"
               />
               <span className="text-foreground font-medium capitalize">
-                {type === "support" ? "Support Issue" : "New Requirement"}
+                {type === "support" ? (formData.isInternal ? "Issue" : "Support Issue") : "New Requirement"}
               </span>
             </label>
           ))}
@@ -379,19 +434,42 @@ export default function CreateTicketForm() {
 
       {/* Ticket Classification */}
       <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg dark:bg-gray-800 dark:border-gray-600 dark:shadow-lg">
-        <h3 className="font-poppins font-semibold text-foreground">Ticket Classification</h3>
+        <h3 className="font-poppins font-semibold text-foreground">
+          {formData.isInternal ? "Target Business Group" : "Ticket Classification"}
+        </h3>
 
         <div>
-          <label className="block text-sm font-medium text-foreground mb-2">Group *</label>
+          <label className="block text-sm font-medium text-foreground mb-2">
+            {formData.isInternal ? "Target Business Group *" : "Group *"}
+          </label>
           <Combobox
-            options={businessUnitGroups.map((bu) => ({
-              value: bu.id.toString(),
-              label: bu.name,
-              subtitle: bu.description,
-            }))}
+            options={
+              formData.isInternal
+                ? businessUnitGroups
+                    .filter((bu) =>
+                      [
+                        "Tech Support",
+                        "DevOps Support",
+                        "Integration Support",
+                        "GUI Support",
+                        "Central Team Support",
+                        "Product Team Support",
+                      ].includes(bu.name)
+                    )
+                    .map((bu) => ({
+                      value: bu.id.toString(),
+                      label: bu.name,
+                      subtitle: bu.description,
+                    }))
+                : businessUnitGroups.map((bu) => ({
+                    value: bu.id.toString(),
+                    label: bu.name,
+                    subtitle: bu.description,
+                  }))
+            }
             value={formData.businessUnitGroupId}
             onChange={handleBusinessUnitChange}
-            placeholder="Select your group..."
+            placeholder={formData.isInternal ? "Select target business group..." : "Select your group..."}
             searchPlaceholder="Search groups..."
             emptyText="No groups found"
           />
