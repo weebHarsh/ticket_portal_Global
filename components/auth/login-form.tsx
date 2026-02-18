@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useState, useEffect, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { signIn } from "next-auth/react"
 import Image from "next/image"
 import { AlertCircle, LogIn } from "lucide-react"
-import { ThemeToggle } from "@/components/theme-toggle"
+import { useTheme } from "next-themes"
 
 interface User {
   id: string
@@ -17,11 +17,17 @@ interface User {
 
 export function LoginForm() {
   const router = useRouter()
+  const { setTheme } = useTheme()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isSSOLoading, setIsSSOLoading] = useState(false)
+
+  // Force light mode on login page
+  useEffect(() => {
+    setTheme("light")
+  }, [setTheme])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -82,10 +88,6 @@ export function LoginForm() {
 
   return (
     <div className="w-full max-w-md">
-      {/* Theme Toggle - Top Right */}
-      <div className="flex justify-end mb-4">
-        <ThemeToggle />
-      </div>
       <div className="bg-card rounded-xl shadow-2xl p-8 border border-border">
         {/* Logo and Header */}
         <div className="text-center mb-8">

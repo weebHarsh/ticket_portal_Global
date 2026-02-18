@@ -1,10 +1,26 @@
 import { neon } from "@neondatabase/serverless"
 import { getDatabaseUrl } from "./utils/db-config"
 
-// Get the appropriate database URL based on environment
-const databaseUrl = getDatabaseUrl()
+// Lazy initialization: only get database URL when actually needed (at runtime, not build time)
+let sqlInstance: ReturnType<typeof neon> | null = null
 
-export const sql = neon(databaseUrl)
+function getSql() {
+  if (!sqlInstance) {
+    const databaseUrl = getDatabaseUrl()
+    sqlInstance = neon(databaseUrl)
+  }
+  return sqlInstance
+}
+
+// Export a getter that initializes on first use
+// Using Proxy to maintain the same API while deferring initialization
+export const sql = new Proxy({} as any, {
+  get(_target, prop) {
+    const instance = getSql()
+    const value = (instance as any)[prop]
+    return typeof value === 'function' ? value.bind(instance) : value
+  }
+}) as ReturnType<typeof neon>
 
 export type User = {
   id: number

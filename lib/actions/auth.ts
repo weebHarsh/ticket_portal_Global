@@ -5,9 +5,26 @@ import bcrypt from "bcryptjs"
 import { cookies } from "next/headers"
 import { getDatabaseUrl } from "@/lib/utils/db-config"
 
-// Get the appropriate database URL based on environment
-const databaseUrl = getDatabaseUrl()
-const sql = neon(databaseUrl)
+// Lazy initialization: only get database URL when actually needed (at runtime, not build time)
+let sqlInstance: ReturnType<typeof neon> | null = null
+
+function getSql() {
+  if (!sqlInstance) {
+    const databaseUrl = getDatabaseUrl()
+    sqlInstance = neon(databaseUrl)
+  }
+  return sqlInstance
+}
+
+// Export a getter that initializes on first use
+// Using Proxy to maintain the same API while deferring initialization
+const sql = new Proxy({} as any, {
+  get(_target, prop) {
+    const instance = getSql()
+    const value = (instance as any)[prop]
+    return typeof value === 'function' ? value.bind(instance) : value
+  }
+}) as ReturnType<typeof neon>
 
 // OWASP: Email validation regex
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
