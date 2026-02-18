@@ -22,6 +22,7 @@ const nextConfig = {
               "default-src 'self'",
               // Allow Vercel's live feedback script in production
               "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://vercel.live", // 'unsafe-eval' for Next.js dev, 'unsafe-inline' for inline scripts, vercel.live for Vercel feedback
+              "script-src-elem 'self' 'unsafe-inline' https://vercel.live", // Explicitly allow script elements from Vercel (required for <script> tags)
               "style-src 'self' 'unsafe-inline'", // 'unsafe-inline' required for Tailwind CSS
               "img-src 'self' data: https: blob:",
               "font-src 'self' data: https:",
