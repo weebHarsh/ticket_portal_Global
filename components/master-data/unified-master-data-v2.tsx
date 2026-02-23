@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Plus, Edit, Trash2, ChevronDown, ChevronRight } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
+  getTargetBusinessGroups,
   getBusinessUnitGroups,
   getCategories,
   getSubcategories,
@@ -25,11 +26,13 @@ import {
 import { getUsers } from "@/lib/actions/tickets"
 import EditDialog from "./edit-dialog"
 import ProjectNamesTab from "./project-names-tab"
+import TargetBusinessGroupMappingsTab from "./target-business-group-mappings-tab"
 
 export default function UnifiedMasterDataV2() {
   const [activeTab, setActiveTab] = useState("business-groups")
 
   // Data states
+  const [targetBusinessGroups, setTargetBusinessGroups] = useState<any[]>([])
   const [businessGroups, setBusinessGroups] = useState<any[]>([])
   const [categories, setCategories] = useState<any[]>([])
   const [subcategories, setSubcategories] = useState<any[]>([])
@@ -48,7 +51,8 @@ export default function UnifiedMasterDataV2() {
 
   const loadData = async () => {
     setLoading(true)
-    const [bgResult, catResult, subcatResult, mappingResult, usersResult] = await Promise.all([
+    const [tbgResult, bgResult, catResult, subcatResult, mappingResult, usersResult] = await Promise.all([
+      getTargetBusinessGroups(),
       getBusinessUnitGroups(),
       getCategories(),
       getSubcategories(),
@@ -56,6 +60,7 @@ export default function UnifiedMasterDataV2() {
       getUsers(),
     ])
 
+    if (tbgResult.success) setTargetBusinessGroups(tbgResult.data || [])
     if (bgResult.success) setBusinessGroups(bgResult.data || [])
     if (catResult.success) setCategories(catResult.data || [])
     if (subcatResult.success) setSubcategories(subcatResult.data || [])
@@ -177,12 +182,13 @@ export default function UnifiedMasterDataV2() {
   // Mapping handlers
   const handleCreateMapping = async (formData: any) => {
     const result = await createTicketClassificationMapping(
-      Number(formData.business_unit_group_id),
+      Number(formData.target_business_group_id),
       Number(formData.category_id),
       Number(formData.subcategory_id),
       Number(formData.estimated_duration),
       formData.spoc_user_id ? Number(formData.spoc_user_id) : undefined,
-      formData.auto_title_template
+      formData.auto_title_template,
+      formData.description
     )
     if (result.success) {
       await loadData()
@@ -222,9 +228,10 @@ export default function UnifiedMasterDataV2() {
   return (
     <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="business-groups">Business Groups</TabsTrigger>
           <TabsTrigger value="categories">Categories & Sub categories</TabsTrigger>
+          <TabsTrigger value="target-bg-mappings">Target BG Mappings</TabsTrigger>
           <TabsTrigger value="project-names">Project Names</TabsTrigger>
         </TabsList>
 
@@ -454,6 +461,11 @@ export default function UnifiedMasterDataV2() {
           </div>
         </TabsContent>
 
+        {/* Target Business Group Mappings Tab */}
+        <TabsContent value="target-bg-mappings" className="mt-6">
+          <TargetBusinessGroupMappingsTab />
+        </TabsContent>
+
         {/* Project Names Tab */}
         <TabsContent value="project-names" className="mt-6">
           <ProjectNamesTab />
@@ -527,11 +539,11 @@ export default function UnifiedMasterDataV2() {
           title={editMapping.id ? "Edit Classification Mapping" : "Add Classification Mapping"}
           fields={[
             {
-              name: "business_unit_group_id",
-              label: "Business Group",
+              name: "target_business_group_id",
+              label: "Target Business Group",
               type: "select",
               required: true,
-              options: businessGroups.map((bg) => ({ value: bg.id, label: bg.name })),
+              options: targetBusinessGroups.map((tbg) => ({ value: tbg.id, label: tbg.name })),
               disabled: !!editMapping.id,
             },
             {
@@ -563,6 +575,7 @@ export default function UnifiedMasterDataV2() {
               options: users.map((user) => ({ value: user.id, label: user.name })),
             },
             { name: "auto_title_template", label: "Auto Title Template", type: "text" },
+            { name: "description", label: "Description", type: "textarea" },
           ]}
           initialData={editMapping}
           onSave={(data) =>

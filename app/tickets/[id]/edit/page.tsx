@@ -6,14 +6,13 @@ import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import DashboardLayout from "@/components/layout/dashboard-layout"
-import { ArrowLeft, Save, Paperclip, Download, Trash2, FileText, Plus, X, Upload, AlertCircle } from "lucide-react"
+import { ArrowLeft, Save, Paperclip, Download, Trash2, FileText, Plus, X, Upload, AlertCircle, MessageSquare } from "lucide-react"
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
-import { getTicketById } from "@/lib/actions/tickets"
-import { getBusinessUnitGroups, getCategories, getSubcategories } from "@/lib/actions/master-data"
-import { getUsers } from "@/lib/actions/tickets"
+import { getTicketById, addComment } from "@/lib/actions/tickets"
+import { getTargetBusinessGroups, getSpocForTargetBusinessGroup } from "@/lib/actions/master-data"
 import { Button } from "@/components/ui/button"
-import { updateTicket } from "@/lib/actions/tickets"
+import RedirectModal from "@/components/tickets/redirect-modal"
 
 export default function EditTicketPage() {
   const params = useParams()
@@ -25,26 +24,14 @@ export default function EditTicketPage() {
   const [saving, setSaving] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [originalTicket, setOriginalTicket] = useState<any>(null)
-  const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-    status: "",
-    priority: "",
-    businessUnitGroupId: "",
-    categoryId: "",
-    subcategoryId: "",
-    assigneeId: "",
-    estimatedDuration: "",
-  })
-
-  const [businessUnitGroups, setBusinessUnitGroups] = useState<any[]>([])
-  const [categories, setCategories] = useState<any[]>([])
-  const [subcategories, setSubcategories] = useState<any[]>([])
-  const [users, setUsers] = useState<any[]>([])
   const [attachments, setAttachments] = useState<any[]>([])
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState("")
   const [uploading, setUploading] = useState(false)
+  const [comment, setComment] = useState("")
+  const [addingComment, setAddingComment] = useState(false)
+  const [isRedirectModalOpen, setIsRedirectModalOpen] = useState(false)
+  const [redirecting, setRedirecting] = useState(false)
 
   // Load current user from session or localStorage
   useEffect(() => {
@@ -75,57 +62,19 @@ export default function EditTicketPage() {
 
   const loadData = async () => {
     setLoading(true)
-    const [ticketResult, buResult, catResult, usersResult] = await Promise.all([
-      getTicketById(Number(ticketId)),
-      getBusinessUnitGroups(),
-      getCategories(),
-      getUsers(),
-    ])
+    const ticketResult = await getTicketById(Number(ticketId))
 
     if (ticketResult.success && ticketResult.data) {
       const ticket = ticketResult.data as any
-      setOriginalTicket(ticket) // Store original ticket for permission checks
-      setFormData({
-        title: ticket.title || "",
-        description: ticket.description || "",
-        status: ticket.status || "",
-        priority: ticket.priority || "",
-        businessUnitGroupId: ticket.business_unit_group_id?.toString() || "",
-        categoryId: ticket.category_id?.toString() || "",
-        subcategoryId: ticket.subcategory_id?.toString() || "",
-        assigneeId: ticket.assigned_to?.toString() || "",
-        estimatedDuration: ticket.estimated_duration || "",
-      })
+      setOriginalTicket(ticket)
 
       // Load existing attachments
       if (ticket.attachments) {
         setAttachments(ticket.attachments)
       }
-
-      if (ticket.category_id) {
-        const subcatResult = await getSubcategories(ticket.category_id)
-        if (subcatResult.success) setSubcategories(subcatResult.data)
-      }
     }
-
-    if (buResult.success) setBusinessUnitGroups(buResult.data)
-    if (catResult.success) setCategories(catResult.data)
-    if (usersResult.success) setUsers(usersResult.data)
 
     setLoading(false)
-  }
-
-  useEffect(() => {
-    if (formData.categoryId) {
-      loadSubcategories(Number(formData.categoryId))
-    }
-  }, [formData.categoryId])
-
-  const loadSubcategories = async (categoryId: number) => {
-    const result = await getSubcategories(categoryId)
-    if (result.success) {
-      setSubcategories(result.data)
-    }
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -213,71 +162,56 @@ export default function EditTicketPage() {
   const isInitiator = currentUser && originalTicket && currentUser.id === originalTicket.created_by
   const isAssignee = currentUser && originalTicket && currentUser.id === originalTicket.assigned_to
   const isSPOC = currentUser && originalTicket && currentUser.id === originalTicket.spoc_user_id
-  const isResolvedOrClosed = originalTicket && (originalTicket.status === "resolved" || originalTicket.status === "closed")
-  const isResolved = originalTicket && originalTicket.status === "resolved"
+  
+  // Check if SPOC name matches logged-in user
+  const isSPOCUser = isSPOC && originalTicket?.spoc_name && 
+    currentUser?.full_name?.toLowerCase() === originalTicket.spoc_name.toLowerCase()
 
-  // If ticket is resolved or closed, only admin can edit (except for reopening)
-  const canEditAtAll = isAdmin || !isResolvedOrClosed || (isResolved && (isInitiator || isAssignee))
+  // Attachments: Anyone can add attachments
+  const canEditAttachments = true
 
-  // Field-level permissions per permissions matrix:
-  // 1. Edit All Fields: Initiator ✅ | SPOC ❌ | Assignee ❌
-  const canEditTitle = canEditAtAll && (isAdmin || isInitiator)
-  const canEditDescription = canEditAtAll && (isAdmin || isInitiator) // Removed assignee - only initiator can edit
-  const canEditPriority = canEditAtAll && isAdmin
-  const canEditBusinessUnitGroup = canEditAtAll && isAdmin
-  const canEditCategory = canEditAtAll && isAdmin
-  const canEditSubcategory = canEditAtAll && isAdmin
-  const canEditEstimatedDuration = canEditAtAll && isAdmin
-  
-  // 4. Assign / Reselect Assignee: Initiator ❌ | SPOC ✅ | Assignee ❌
-  const canEditAssignee = canEditAtAll && (isAdmin || isSPOC)
-  
-  // Status edit permissions:
-  // 6. Change Status to On-Hold: Initiator ❌ | SPOC ✅ | Assignee ❌
-  // 7. Update Status to Resolved: Initiator ❌ | SPOC ❌ | Assignee ✅
-  // 3. Reopen Resolved Ticket: Initiator ✅ | SPOC ❌ | Assignee ✅
-  // Note: Status changes are handled in updateTicketStatus() function, but we need to restrict the dropdown
-  const canEditStatus = canEditAtAll && (isAdmin || isSPOC || isAssignee)
-  
-  // Attachments: Initiator, Assignee, and SPOC can manage (keeping current logic)
-  const canEditAttachments = canEditAtAll && (isAdmin || isInitiator || isAssignee || isSPOC)
+  const handleAddComment = async () => {
+    if (!comment.trim()) return
+
+    setAddingComment(true)
+    const result = await addComment(Number(ticketId), comment.trim())
+    setAddingComment(false)
+
+    if (result.success) {
+      setComment("")
+      // Reload ticket to get updated comments
+      loadData()
+    } else {
+      alert("Failed to add comment: " + (result.error || "Unknown error"))
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // Double-check permissions before submitting
-    if (!canEditAtAll) {
-      alert("You do not have permission to edit this ticket.")
-      return
-    }
 
     setSaving(true)
 
-    // Upload new files first
+    // Upload new files
     const uploadSuccess = await uploadNewFiles()
     if (!uploadSuccess) {
       setSaving(false)
       return
     }
 
-    const result = await updateTicket(Number(ticketId), {
-      title: formData.title,
-      description: formData.description,
-      status: formData.status,
-      priority: formData.priority,
-      businessUnitGroupId: Number(formData.businessUnitGroupId),
-      categoryId: Number(formData.categoryId),
-      subcategoryId: Number(formData.subcategoryId),
-      assigneeId: Number(formData.assigneeId),
-      estimatedDuration: formData.estimatedDuration,
-    })
-
     setSaving(false)
+    router.push(`/tickets/${ticketId}`)
+  }
+
+  const handleRedirect = async (targetBusinessGroupId: number, spocUserId: number, remarks: string) => {
+    setRedirecting(true)
+    const { redirectTicket } = await import("@/lib/actions/tickets")
+    const result = await redirectTicket(Number(ticketId), targetBusinessGroupId, spocUserId, remarks)
+    setRedirecting(false)
 
     if (result.success) {
       router.push(`/tickets/${ticketId}`)
     } else {
-      alert("Failed to update ticket")
+      alert("Failed to redirect ticket: " + (result.error || "Unknown error"))
     }
   }
 
@@ -291,32 +225,18 @@ export default function EditTicketPage() {
     )
   }
 
-  // Show access denied message if user can't edit at all
-  if (!canEditAtAll) {
+  if (!originalTicket) {
     return (
       <DashboardLayout>
-        <div className="max-w-4xl">
-          <div className="flex items-center gap-4 mb-6">
-            <button onClick={() => router.back()} className="p-2 hover:bg-surface dark:hover:bg-gray-700 rounded-lg transition-colors">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h1 className="text-2xl font-poppins font-bold text-foreground">Edit Ticket</h1>
-          </div>
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">Access Restricted</h3>
-                <p className="text-sm text-red-700 dark:text-red-300">
-                  This ticket is {originalTicket?.status} and can only be edited by administrators.
-                </p>
-              </div>
-            </div>
-          </div>
+        <div className="text-center py-12">
+          <p className="text-foreground-secondary">Ticket not found</p>
         </div>
       </DashboardLayout>
     )
   }
+
+  const ticketType = originalTicket.ticket_type || "support"
+  const isSupportTicket = ticketType === "support"
 
   return (
     <DashboardLayout>
@@ -328,170 +248,186 @@ export default function EditTicketPage() {
           <h1 className="text-2xl font-poppins font-bold text-foreground">Edit Ticket</h1>
         </div>
 
-        {/* Permission Info Banner */}
-        {!isAdmin && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-blue-700 dark:text-blue-300">
-                {isInitiator && "As the initiator, you can only edit the Title and Description."}
-                {isAssignee && !isInitiator && "As the assignee, you can only edit the Status and Description."}
-              </p>
+        {/* Info Banner */}
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-blue-700 dark:text-blue-300">
+              Ticket details are read-only. You can only add comments and attachments.
+            </p>
+          </div>
+        </div>
+
+        {/* Redirect View for SPOC Users */}
+        {isSPOCUser && (
+          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-poppins font-semibold text-foreground">Redirect Ticket</h3>
+              <Button
+                onClick={() => setIsRedirectModalOpen(true)}
+                className="bg-gradient-to-r from-primary to-secondary"
+                disabled={redirecting}
+              >
+                {redirecting ? "Redirecting..." : "Redirect Ticket"}
+              </Button>
             </div>
+            <p className="text-sm text-foreground-secondary">
+              As the SPOC for this ticket, you can redirect it to another Target Business Group.
+            </p>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Read-only Ticket Details */}
           <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
-            <h3 className="font-poppins font-semibold text-foreground">Basic Information</h3>
+            <h3 className="font-poppins font-semibold text-foreground">Ticket Details (Read-Only)</h3>
 
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Title *</label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                required
-                disabled={!canEditTitle}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              />
+            {/* Dynamic Layout based on Ticket Type */}
+            {isSupportTicket ? (
+              /* Support Ticket Layout */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Title</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.title || "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Status</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.status ? originalTicket.status.charAt(0).toUpperCase() + originalTicket.status.slice(1) : "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Category</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.category_name || "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Subcategory</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.subcategory_name || "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">SPOC</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.spoc_name || "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Target Business Group</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.target_business_group_name || "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Assignee</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.assignee_name || "Unassigned"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Estimated Duration</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.estimated_duration || "-"}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Requirement Ticket Layout */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Title</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.title || "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Status</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.status ? originalTicket.status.charAt(0).toUpperCase() + originalTicket.status.slice(1) : "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Priority</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.priority ? originalTicket.priority.charAt(0).toUpperCase() + originalTicket.priority.slice(1) : "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Project</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.project_name || "-"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Assignee</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.assignee_name || "Unassigned"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground-secondary mb-1">Estimated Release Date</label>
+                  <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground">
+                    {originalTicket.estimated_release_date ? new Date(originalTicket.estimated_release_date).toLocaleDateString() : "-"}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-foreground-secondary mb-1">Description</label>
+              <div className="px-4 py-2.5 bg-surface dark:bg-gray-700 rounded-lg text-sm text-foreground whitespace-pre-wrap">
+                {originalTicket.description || "-"}
+              </div>
             </div>
+          </div>
 
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Description</label>
+          {/* Comments Section */}
+          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
+            <h3 className="font-poppins font-semibold text-foreground">Comments</h3>
+
+            {/* Existing Comments */}
+            {originalTicket.comments && originalTicket.comments.length > 0 && (
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {originalTicket.comments.map((comment: any) => (
+                  <div key={comment.id} className="flex gap-3 pb-3 border-b border-border last:border-0">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-medium text-sm flex-shrink-0">
+                      {comment.user_name?.charAt(0) || "U"}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium text-foreground text-sm">{comment.user_name}</span>
+                        <span className="text-xs text-foreground-secondary">
+                          {new Date(comment.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground-secondary whitespace-pre-wrap">{comment.content}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add Comment */}
+            <div className="space-y-3">
               <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                rows={5}
-                disabled={!canEditDescription}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Add a comment..."
+                rows={4}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm resize-none"
               />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Status *</label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  required
-                  disabled={!canEditStatus}
-                  className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="open">Open</option>
-                  <option value="on-hold">On Hold</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="closed">Closed</option>
-                  <option value="returned">Returned</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Priority *</label>
-                <select
-                  value={formData.priority}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                  required
-                  disabled={!canEditPriority}
-                  className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="critical">Critical</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
-            <h3 className="font-poppins font-semibold text-foreground">Classification</h3>
-
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Business Unit Group *</label>
-              <select
-                value={formData.businessUnitGroupId}
-                onChange={(e) => setFormData({ ...formData, businessUnitGroupId: e.target.value })}
-                required
-                disabled={!canEditBusinessUnitGroup}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              <Button
+                type="button"
+                onClick={handleAddComment}
+                disabled={!comment.trim() || addingComment}
+                className="bg-gradient-to-r from-primary to-secondary"
               >
-                <option value="">Select...</option>
-                {businessUnitGroups.map((bu) => (
-                  <option key={bu.id} value={bu.id}>
-                    {bu.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Category *</label>
-              <select
-                value={formData.categoryId}
-                onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
-                required
-                disabled={!canEditCategory}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">Select...</option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Subcategory *</label>
-              <select
-                value={formData.subcategoryId}
-                onChange={(e) => setFormData({ ...formData, subcategoryId: e.target.value })}
-                required
-                disabled={!canEditSubcategory || !formData.categoryId}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">Select...</option>
-                {subcategories.map((sub) => (
-                  <option key={sub.id} value={sub.id}>
-                    {sub.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
-            <h3 className="font-poppins font-semibold text-foreground">Assignment</h3>
-
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Assignee *</label>
-              <select
-                value={formData.assigneeId}
-                onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })}
-                required
-                disabled={!canEditAssignee}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">Select...</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name || user.full_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Estimated Duration</label>
-              <input
-                type="text"
-                value={formData.estimatedDuration}
-                onChange={(e) => setFormData({ ...formData, estimatedDuration: e.target.value })}
-                disabled={!canEditEstimatedDuration}
-                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              />
+                {addingComment ? "Adding..." : "Add Comment"}
+              </Button>
             </div>
           </div>
 
@@ -610,12 +546,22 @@ export default function EditTicketPage() {
             <Button type="button" variant="outline" onClick={() => router.back()}>
               Cancel
             </Button>
-            <Button type="submit" disabled={saving} className="bg-gradient-to-r from-primary to-secondary">
+            <Button type="submit" disabled={saving || uploading} className="bg-gradient-to-r from-primary to-secondary">
               <Save className="w-4 h-4 mr-2" />
-              {saving ? "Saving..." : "Save Changes"}
+              {saving || uploading ? "Saving..." : "Save Attachments"}
             </Button>
           </div>
         </form>
+
+        {/* Redirect Modal */}
+        <RedirectModal
+          isOpen={isRedirectModalOpen}
+          onClose={() => setIsRedirectModalOpen(false)}
+          onConfirm={handleRedirect}
+          currentBusinessUnitGroupId={originalTicket?.target_business_group_id || null}
+          currentBusinessUnitGroupName={originalTicket?.target_business_group_name || null}
+          ticketTitle={originalTicket?.title || ""}
+        />
       </div>
     </DashboardLayout>
   )

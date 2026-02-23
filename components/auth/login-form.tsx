@@ -17,7 +17,7 @@ interface User {
 
 // Map NextAuth error codes to user-friendly messages
 const errorMessages: Record<string, string> = {
-  AccessDenied: "Access denied. Please contact your administrator to request access.",
+  AccessDenied: "Authentication failed. This may be due to a database connection issue. Please try again or contact support if the problem persists.",
   Configuration: "There is a problem with the server configuration. Please contact support.",
   Verification: "The verification token has expired or has already been used.",
   Default: "An error occurred during sign-in. Please try again.",
@@ -90,7 +90,13 @@ export function LoginForm() {
       router.push("/dashboard")
       router.refresh()
     } catch (err) {
-      setError("Login failed. Please try again.")
+      console.error("[LoginForm] Network error:", err)
+      const errorMessage = err instanceof Error ? err.message : "Network error"
+      if (errorMessage.includes("fetch failed") || errorMessage.includes("Failed to fetch")) {
+        setError("Unable to connect to the server. Please check your internet connection and try again.")
+      } else {
+        setError("Login failed. Please try again.")
+      }
     } finally {
       setIsLoading(false)
     }

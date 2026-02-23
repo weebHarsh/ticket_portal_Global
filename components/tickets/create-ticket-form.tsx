@@ -9,17 +9,22 @@ import { AlertCircle, CheckCircle, Plus, X, Paperclip } from "lucide-react"
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 import { createTicket, getUsers } from "@/lib/actions/tickets"
 import {
+  getTargetBusinessGroups,
   getBusinessUnitGroups,
   getCategories,
   getSubcategories,
-  getSpocForBusinessUnitGroup,
+  getSpocForTargetBusinessGroup,
+  getClassificationMappingByTargetBusinessGroup,
+  getOrganizations,
+  getTargetBusinessGroupsByOrganization,
 } from "@/lib/actions/master-data"
 import { Combobox } from "@/components/ui/combobox"
 
 interface FormData {
   isInternal: boolean
   ticketType: "support" | "requirement"
-  businessUnitGroupId: string
+  organizationId: string // New field for Organization
+  targetBusinessGroupId: string
   projectId: string
   estimatedReleaseDate: string
   categoryId: string
@@ -43,7 +48,8 @@ export default function CreateTicketForm() {
   const [formData, setFormData] = useState<FormData>({
     isInternal: searchParams.get("isInternal") === "true",
     ticketType: (searchParams.get("ticketType") as "support" | "requirement") || "support",
-    businessUnitGroupId: searchParams.get("businessUnitGroupId") || "",
+    organizationId: searchParams.get("organizationId") || "",
+    targetBusinessGroupId: searchParams.get("targetBusinessGroupId") || "",
     projectId: searchParams.get("projectId") || "",
     estimatedReleaseDate: searchParams.get("estimatedReleaseDate") || "",
     categoryId: searchParams.get("categoryId") || "",
@@ -57,7 +63,9 @@ export default function CreateTicketForm() {
   })
   const [userGroupId, setUserGroupId] = useState<string | null>(null)
 
+  const [targetBusinessGroups, setTargetBusinessGroups] = useState<any[]>([])
   const [businessUnitGroups, setBusinessUnitGroups] = useState<any[]>([])
+  const [organizations, setOrganizations] = useState<any[]>([])
   const [categories, setCategories] = useState<any[]>([])
   const [subcategories, setSubcategories] = useState<any[]>([])
   const [assignees, setAssignees] = useState<any[]>([])
@@ -81,28 +89,105 @@ export default function CreateTicketForm() {
     loadInitialData()
   }, [])
 
-  // Pre-select user's group when data is loaded (only for customer tickets)
+  // Pre-select target business group based on user's business unit group (only for customer tickets)
   useEffect(() => {
-    if (userGroupId && !formData.businessUnitGroupId && !isDuplicate && !formData.isInternal) {
-      setFormData((prev) => ({ ...prev, businessUnitGroupId: userGroupId }))
+    if (userGroupId && !formData.targetBusinessGroupId && !isDuplicate && !formData.isInternal) {
+      const userBug = businessUnitGroups.find(bug => bug.id.toString() === userGroupId)
+      if (userBug) {
+        // Customer ticket mappings: CS Apps -> TD Apps, CS Web -> TD Web, etc.
+        const customerMappings: Record<string, string> = {
+          'CS Apps': 'TD Apps',
+          'CS Web': 'TD Web',
+          'CS Brand': 'TD Brand',
+          'CS BM': 'TD BM',
+          'CS RMN': 'TD RMN',
+        }
+        
+        const mappedTargetGroupName = customerMappings[userBug.name]
+        if (mappedTargetGroupName) {
+          const matchingTbg = targetBusinessGroups.find(tbg => tbg.name === mappedTargetGroupName)
+          if (matchingTbg) {
+            setFormData((prev) => ({ ...prev, targetBusinessGroupId: matchingTbg.id.toString() }))
+          }
+        }
+        // For Sales and Others, no pre-selection (user will see filtered list)
+      }
     }
-  }, [userGroupId, businessUnitGroups, formData.isInternal])
+  }, [userGroupId, businessUnitGroups, targetBusinessGroups, formData.isInternal, formData.targetBusinessGroupId, isDuplicate])
 
   const loadInitialData = async () => {
     console.log("[v0] Loading initial data for create ticket form")
-    const [buResult, catResult, usersResult] = await Promise.all([
+    const [buResult, orgResult, catResult, usersResult] = await Promise.all([
       getBusinessUnitGroups(),
+      getOrganizations(),
       getCategories(),
       getUsers(),
     ])
 
     console.log("[v0] Business Units:", buResult)
+    console.log("[v0] Organizations:", orgResult)
     console.log("[v0] Categories:", catResult)
     console.log("[v0] Users:", usersResult)
 
     if (buResult.success) setBusinessUnitGroups(buResult.data || [])
+    if (orgResult.success) setOrganizations(orgResult.data || [])
     if (catResult.success) setCategories(catResult.data || [])
     if (usersResult.success) setAssignees(usersResult.data || [])
+
+    // Load target business groups based on ticket type
+    if (formData.isInternal) {
+      // For internal tickets, only load if organization is selected
+      if (formData.organizationId) {
+        const tbgResult = await getTargetBusinessGroupsByOrganization(Number(formData.organizationId))
+        if (tbgResult.success) setTargetBusinessGroups(tbgResult.data || [])
+      } else {
+        setTargetBusinessGroups([])
+      }
+    } else {
+      // For customer tickets, filter to show only specific target business groups
+      // Sales and Others: show TD Apps, TD Web, TD Brand, TD BM, TD RMN
+      // Other groups: show only their mapped target group
+      const userBug = businessUnitGroups.find(bug => bug.id.toString() === userGroupId)
+      const allTbgResult = await getTargetBusinessGroups()
+      
+      if (allTbgResult.success && allTbgResult.data) {
+        const allTargetGroups = allTbgResult.data
+        
+        if (userBug) {
+          const userGroupName = userBug.name
+          
+          // Customer ticket mappings
+          const customerMappings: Record<string, string> = {
+            'CS Apps': 'TD Apps',
+            'CS Web': 'TD Web',
+            'CS Brand': 'TD Brand',
+            'CS BM': 'TD BM',
+            'CS RMN': 'TD RMN',
+          }
+          
+          // Groups that should see all 5 target groups
+          const showAllGroups = ['Sales', 'Others']
+          
+          if (showAllGroups.includes(userGroupName)) {
+            // Show TD Apps, TD Web, TD Brand, TD BM, TD RMN
+            const allowedGroups = ['TD Apps', 'TD Web', 'TD Brand', 'TD BM', 'TD RMN']
+            setTargetBusinessGroups(allTargetGroups.filter(tbg => allowedGroups.includes(tbg.name)))
+          } else if (customerMappings[userGroupName]) {
+            // Show only the mapped target group
+            const mappedGroup = customerMappings[userGroupName]
+            setTargetBusinessGroups(allTargetGroups.filter(tbg => tbg.name === mappedGroup))
+          } else {
+            // Default: show all 5 target groups
+            const allowedGroups = ['TD Apps', 'TD Web', 'TD Brand', 'TD BM', 'TD RMN']
+            setTargetBusinessGroups(allTargetGroups.filter(tbg => allowedGroups.includes(tbg.name)))
+          }
+        } else {
+          // No user group found, show all 5 target groups
+          const allowedGroups = ['TD Apps', 'TD Web', 'TD Brand', 'TD BM', 'TD RMN']
+          setTargetBusinessGroups(allTargetGroups.filter(tbg => allowedGroups.includes(tbg.name)))
+        }
+      }
+    }
 
     // If duplicating, load dependent data
     if (isDuplicate) {
@@ -146,47 +231,99 @@ export default function CreateTicketForm() {
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const handleBusinessUnitChange = async (value: string) => {
-    const selectedGroup = businessUnitGroups.find((bu) => bu.id.toString() === value)
+  const handleTargetBusinessGroupChange = async (value: string) => {
+    const selectedGroup = targetBusinessGroups.find((tbg) => tbg.id.toString() === value)
     let spocId = ""
 
-    if (formData.isInternal && selectedGroup) {
-      // For internal tickets, get SPOC from ticket_classification_mapping
-      const spocResult = await getSpocForBusinessUnitGroup(Number(value))
+    if (selectedGroup) {
+      // Get SPOC from ticket_classification_mapping using target business group
+      const spocResult = await getSpocForTargetBusinessGroup(Number(value))
       if (spocResult.success && spocResult.data) {
         spocId = spocResult.data.id.toString()
-      }
-    } else if (selectedGroup?.spoc_name) {
-      // For customer tickets, use existing logic (spoc_name from business_unit_groups)
-      const spocUser = assignees.find(
-        (user) => user.full_name?.toLowerCase() === selectedGroup.spoc_name?.toLowerCase()
-      )
-      if (spocUser) {
-        spocId = spocUser.id.toString()
       }
     }
 
     setFormData((prev) => ({
       ...prev,
-      businessUnitGroupId: value,
+      targetBusinessGroupId: value,
       categoryId: "",
       subcategoryId: "",
       spocId: spocId,
     }))
   }
 
-  const handleInternalToggle = (isInternal: boolean) => {
+  const handleInternalToggle = async (isInternal: boolean) => {
     setFormData((prev) => ({
       ...prev,
       isInternal,
-      businessUnitGroupId: "", // Reset business group selection
+      organizationId: "", // Reset organization selection
+      targetBusinessGroupId: "", // Reset target business group selection
       categoryId: "",
       subcategoryId: "",
       spocId: "",
     }))
+    // Reset target business groups when toggling
+    if (isInternal) {
+      setTargetBusinessGroups([])
+    } else {
+      // Load filtered target business groups for customer tickets based on user's group
+      const userBug = businessUnitGroups.find(bug => bug.id.toString() === userGroupId)
+      const allTbgResult = await getTargetBusinessGroups()
+      
+      if (allTbgResult.success && allTbgResult.data) {
+        const allTargetGroups = allTbgResult.data
+        
+        if (userBug) {
+          const userGroupName = userBug.name
+          const customerMappings: Record<string, string> = {
+            'CS Apps': 'TD Apps',
+            'CS Web': 'TD Web',
+            'CS Brand': 'TD Brand',
+            'CS BM': 'TD BM',
+            'CS RMN': 'TD RMN',
+          }
+          const showAllGroups = ['Sales', 'Others']
+          
+          if (showAllGroups.includes(userGroupName)) {
+            const allowedGroups = ['TD Apps', 'TD Web', 'TD Brand', 'TD BM', 'TD RMN']
+            setTargetBusinessGroups(allTargetGroups.filter(tbg => allowedGroups.includes(tbg.name)))
+          } else if (customerMappings[userGroupName]) {
+            const mappedGroup = customerMappings[userGroupName]
+            setTargetBusinessGroups(allTargetGroups.filter(tbg => tbg.name === mappedGroup))
+          } else {
+            const allowedGroups = ['TD Apps', 'TD Web', 'TD Brand', 'TD BM', 'TD RMN']
+            setTargetBusinessGroups(allTargetGroups.filter(tbg => allowedGroups.includes(tbg.name)))
+          }
+        } else {
+          const allowedGroups = ['TD Apps', 'TD Web', 'TD Brand', 'TD BM', 'TD RMN']
+          setTargetBusinessGroups(allTargetGroups.filter(tbg => allowedGroups.includes(tbg.name)))
+        }
+      }
+    }
   }
 
-  const handleCategoryChange = (value: string) => {
+  const handleOrganizationChange = async (value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      organizationId: value,
+      targetBusinessGroupId: "", // Reset target business group when organization changes
+      categoryId: "",
+      subcategoryId: "",
+      spocId: "",
+    }))
+
+    // Load target business groups for the selected organization
+    if (value) {
+      const result = await getTargetBusinessGroupsByOrganization(Number(value))
+      if (result.success) {
+        setTargetBusinessGroups(result.data || [])
+      }
+    } else {
+      setTargetBusinessGroups([])
+    }
+  }
+
+  const handleCategoryChange = async (value: string) => {
     setFormData((prev) => ({
       ...prev,
       categoryId: value,
@@ -194,14 +331,41 @@ export default function CreateTicketForm() {
     }))
   }
 
-  const handleSubcategoryChange = (value: string) => {
-    // Find the selected subcategory to get auto-fill data
-    const selectedSubcat = subcategories.find((s) => s.id.toString() === value)
+  const handleSubcategoryChange = async (value: string) => {
+    if (!formData.targetBusinessGroupId || !formData.categoryId) {
+      setFormData((prev) => ({
+        ...prev,
+        subcategoryId: value,
+      }))
+      return
+    }
 
-    if (selectedSubcat) {
-      // Auto-fill from subcategory data
-      const durationMinutes = selectedSubcat.estimated_duration_minutes || 0
-      let durationText = ""
+    // Find the selected subcategory
+    const selectedSubcat = subcategories.find((s) => s.id.toString() === value)
+    if (!selectedSubcat) {
+      setFormData((prev) => ({
+        ...prev,
+        subcategoryId: value,
+      }))
+      return
+    }
+
+    // Try to get classification mapping for the selected target business group, category, and subcategory
+    const mappingResult = await getClassificationMappingByTargetBusinessGroup(
+      Number(formData.targetBusinessGroupId),
+      Number(formData.categoryId),
+      Number(value)
+    )
+
+    let durationText = ""
+    let descriptionText = ""
+    let spocId = formData.spocId
+
+    if (mappingResult.success && mappingResult.data) {
+      // Use mapping data for auto-fill
+      const mapping = mappingResult.data
+      const durationMinutes = mapping.estimated_duration || 0
+      
       if (durationMinutes >= 60) {
         const hours = Math.floor(durationMinutes / 60)
         const mins = durationMinutes % 60
@@ -210,18 +374,74 @@ export default function CreateTicketForm() {
         durationText = `${durationMinutes} min`
       }
 
-      setFormData((prev) => ({
-        ...prev,
-        subcategoryId: value,
-        description: selectedSubcat.input_template || prev.description,
-        estimatedDuration: durationText,
-      }))
+      descriptionText = mapping.description || selectedSubcat.input_template || ""
+      if (mapping.spoc_user_id) {
+        spocId = mapping.spoc_user_id.toString()
+      }
     } else {
-      setFormData((prev) => ({
-        ...prev,
-        subcategoryId: value,
-      }))
+      // No mapping found - check if "Others" category/subcategory exists and use it
+      const othersCategory = categories.find((c) => c.name === "Others")
+      const othersSubcategory = othersCategory
+        ? subcategories.find((s) => s.category_id === othersCategory.id && s.name === "Others")
+        : null
+
+      if (othersCategory && othersSubcategory) {
+        // Try to get "Others" mapping for this target business group
+        const othersMappingResult = await getClassificationMappingByTargetBusinessGroup(
+          Number(formData.targetBusinessGroupId),
+          othersCategory.id,
+          othersSubcategory.id
+        )
+
+        if (othersMappingResult.success && othersMappingResult.data) {
+          const othersMapping = othersMappingResult.data
+          const durationMinutes = othersMapping.estimated_duration || 0
+          
+          if (durationMinutes >= 60) {
+            const hours = Math.floor(durationMinutes / 60)
+            const mins = durationMinutes % 60
+            durationText = mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`
+          } else if (durationMinutes > 0) {
+            durationText = `${durationMinutes} min`
+          }
+
+          descriptionText = othersMapping.description || ""
+          if (othersMapping.spoc_user_id) {
+            spocId = othersMapping.spoc_user_id.toString()
+          }
+        }
+
+        // Update form to use "Others" category/subcategory
+        setFormData((prev) => ({
+          ...prev,
+          categoryId: othersCategory.id.toString(),
+          subcategoryId: othersSubcategory.id.toString(),
+          description: descriptionText,
+          estimatedDuration: durationText,
+          spocId: spocId,
+        }))
+        return
+      } else {
+        // Fallback to subcategory data if available
+        const durationMinutes = selectedSubcat.estimated_duration_minutes || 0
+        if (durationMinutes >= 60) {
+          const hours = Math.floor(durationMinutes / 60)
+          const mins = durationMinutes % 60
+          durationText = mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`
+        } else if (durationMinutes > 0) {
+          durationText = `${durationMinutes} min`
+        }
+        descriptionText = selectedSubcat.input_template || ""
+      }
     }
+
+    setFormData((prev) => ({
+      ...prev,
+      subcategoryId: value,
+      description: descriptionText,
+      estimatedDuration: durationText,
+      spocId: spocId,
+    }))
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -269,17 +489,23 @@ export default function CreateTicketForm() {
 
       // Validate based on ticket type
       if (formData.ticketType === "requirement") {
-        if (!formData.businessUnitGroupId || !formData.title || !formData.spocId) {
-          throw new Error("Please fill in all required fields (Group, Title, SPOC)")
+        if (formData.isInternal && !formData.organizationId) {
+          throw new Error("Please select an Organization")
+        }
+        if (!formData.targetBusinessGroupId || !formData.title || !formData.spocId) {
+          throw new Error("Please fill in all required fields (Target Business Group, Title, SPOC)")
         }
       } else {
+        if (formData.isInternal && !formData.organizationId) {
+          throw new Error("Please select an Organization")
+        }
         if (
-          !formData.businessUnitGroupId ||
+          !formData.targetBusinessGroupId ||
           !formData.categoryId ||
           !formData.subcategoryId ||
           !formData.spocId
         ) {
-          throw new Error("Please fill in all required fields (Group, Category, Sub-Category, SPOC)")
+          throw new Error("Please fill in all required fields (Target Business Group, Category, Sub-Category, SPOC)")
         }
       }
 
@@ -298,7 +524,7 @@ export default function CreateTicketForm() {
       const result = await createTicket({
         ticketType: formData.ticketType,
         parentTicketId: isSubTicket && parentTicketId ? Number(parentTicketId) : null,
-        businessUnitGroupId: Number(formData.businessUnitGroupId),
+        targetBusinessGroupId: Number(formData.targetBusinessGroupId),
         projectId: formData.projectId ? Number(formData.projectId) : null,
         categoryId: formData.categoryId ? Number(formData.categoryId) : null,
         subcategoryId: formData.subcategoryId && formData.subcategoryId !== "N/A" ? Number(formData.subcategoryId) : null,
@@ -435,8 +661,29 @@ export default function CreateTicketForm() {
       {/* Ticket Classification */}
       <div className="bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg dark:bg-gray-800 dark:border-gray-600 dark:shadow-lg">
         <h3 className="font-poppins font-semibold text-foreground">
-          {formData.isInternal ? "Target Business Group" : "Ticket Classification"}
+          {formData.isInternal ? "Organization & Target Business Group" : "Ticket Classification"}
         </h3>
+
+        {/* Organization dropdown - only for Internal tickets */}
+        {formData.isInternal && (
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Organization *
+            </label>
+            <Combobox
+              options={organizations.map((org) => ({
+                value: org.id.toString(),
+                label: org.name,
+                subtitle: org.description,
+              }))}
+              value={formData.organizationId}
+              onChange={handleOrganizationChange}
+              placeholder="Select organization..."
+              searchPlaceholder="Search organizations..."
+              emptyText="No organizations found"
+            />
+          </div>
+        )}
 
         <div>
           <label className="block text-sm font-medium text-foreground mb-2">
@@ -445,33 +692,29 @@ export default function CreateTicketForm() {
           <Combobox
             options={
               formData.isInternal
-                ? businessUnitGroups
-                    .filter((bu) =>
-                      [
-                        "Tech Support",
-                        "DevOps Support",
-                        "Integration Support",
-                        "GUI Support",
-                        "Central Team Support",
-                        "Product Team Support",
-                      ].includes(bu.name)
-                    )
-                    .map((bu) => ({
-                      value: bu.id.toString(),
-                      label: bu.name,
-                      subtitle: bu.description,
-                    }))
-                : businessUnitGroups.map((bu) => ({
-                    value: bu.id.toString(),
-                    label: bu.name,
-                    subtitle: bu.description,
+                ? targetBusinessGroups.map((tbg) => ({
+                    value: tbg.id.toString(),
+                    label: tbg.name,
+                    subtitle: tbg.description,
+                  }))
+                : targetBusinessGroups.map((tbg) => ({
+                    value: tbg.id.toString(),
+                    label: tbg.name,
+                    subtitle: tbg.description,
                   }))
             }
-            value={formData.businessUnitGroupId}
-            onChange={handleBusinessUnitChange}
-            placeholder={formData.isInternal ? "Select target business group..." : "Select your group..."}
-            searchPlaceholder="Search groups..."
-            emptyText="No groups found"
+            value={formData.targetBusinessGroupId}
+            onChange={handleTargetBusinessGroupChange}
+            placeholder={
+              formData.isInternal
+                ? formData.organizationId
+                  ? "Select target business group..."
+                  : "Select organization first..."
+                : "Select target business group..."
+            }
+            searchPlaceholder="Search target business groups..."
+            emptyText="No target business groups found"
+            disabled={formData.isInternal && !formData.organizationId}
           />
         </div>
 
@@ -517,10 +760,10 @@ export default function CreateTicketForm() {
                 }))}
                 value={formData.categoryId}
                 onChange={handleCategoryChange}
-                placeholder={formData.businessUnitGroupId ? "Select a category..." : "Select a group first"}
+                placeholder={formData.targetBusinessGroupId ? "Select a category..." : "Select a target business group first"}
                 searchPlaceholder="Search categories..."
                 emptyText="No categories found"
-                disabled={!formData.businessUnitGroupId}
+                disabled={!formData.targetBusinessGroupId}
               />
             </div>
 

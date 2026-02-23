@@ -46,6 +46,7 @@ export default function ProjectNamesTab() {
       setData(result.data)
     } else {
       setData([])
+      // eslint-disable-next-line no-console
       console.error("Failed to load projects:", result.error)
     }
     setLoading(false)

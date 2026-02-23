@@ -16,6 +16,7 @@ export default function TicketsPage() {
   const [activeTab, setActiveTab] = useState<"customer" | "internal">("customer")
   const [filters, setFilters] = useState({})
   const [exportFn, setExportFn] = useState<(() => void) | null>(null)
+  const [currentTickets, setCurrentTickets] = useState<any[]>([])
 
   useEffect(() => {
     if (showSuccess) {
@@ -37,10 +38,11 @@ export default function TicketsPage() {
 
   const handleTabChange = (value: string) => {
     setActiveTab(value as "customer" | "internal")
-    // Reset filters when switching tabs
+    // Reset filters and tickets when switching tabs
     setFilters({
       isInternal: value === "internal",
     })
+    setCurrentTickets([])
   }
 
   return (
@@ -65,8 +67,13 @@ export default function TicketsPage() {
               onFilterChange={handleFilterChange} 
               onExport={exportFn || undefined}
               isInternal={false}
+              tickets={currentTickets}
             />
-            <TicketsTable filters={filters} onExportReady={handleExportReady} />
+            <TicketsTable 
+              filters={filters} 
+              onExportReady={handleExportReady}
+              onTicketsChange={setCurrentTickets}
+            />
           </TabsContent>
 
           <TabsContent value="internal" className="space-y-4">
@@ -74,8 +81,13 @@ export default function TicketsPage() {
               onFilterChange={handleFilterChange} 
               onExport={exportFn || undefined}
               isInternal={true}
+              tickets={currentTickets}
             />
-            <TicketsTable filters={filters} onExportReady={handleExportReady} />
+            <TicketsTable 
+              filters={filters} 
+              onExportReady={handleExportReady}
+              onTicketsChange={setCurrentTickets}
+            />
           </TabsContent>
         </Tabs>
       </div>

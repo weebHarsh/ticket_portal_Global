@@ -3,7 +3,57 @@ import { getDatabaseUrl } from "./utils/db-config"
 
 // ✅ Simple, direct initialization - no Proxy, no lazy tricks
 const databaseUrl = getDatabaseUrl()
-export const sql: NeonQueryFunction<false, false> = neon(databaseUrl)
+
+// Initialize Neon client
+// Note: Neon serverless uses fetch under the hood
+// For timeout issues, we'll add retry logic via a wrapper
+const neonClient = neon(databaseUrl)
+
+// Wrapper function to add retry logic for transient failures
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | unknown
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      
+      // Check if it's a timeout or network error that we should retry
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorCode = (error as any)?.code
+      const isRetryable = 
+        errorCode === 'ETIMEDOUT' ||
+        errorMessage.includes('ETIMEDOUT') ||
+        errorMessage.includes('fetch failed') ||
+        errorMessage.includes('ECONNREFUSED') ||
+        errorMessage.includes('ENOTFOUND') ||
+        errorMessage.includes('timeout') ||
+        (error as any)?.cause?.code === 'ETIMEDOUT'
+      
+      if (!isRetryable || attempt === maxRetries) {
+        throw error
+      }
+      
+      // Exponential backoff: 1s, 2s, 4s
+      const waitTime = delayMs * Math.pow(2, attempt - 1)
+      console.warn(`[DB Retry] Attempt ${attempt}/${maxRetries} failed (${errorMessage}). Retrying in ${waitTime}ms...`)
+      await new Promise(resolve => setTimeout(resolve, waitTime))
+    }
+  }
+  
+  throw lastError
+}
+
+// Create a wrapped SQL function that includes retry logic
+// The Neon client returns a function that accepts template strings
+export const sql = ((strings: TemplateStringsArray, ...values: any[]) => {
+  return withRetry(() => neonClient(strings, ...values))
+}) as NeonQueryFunction<false, false>
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +64,14 @@ export type User = {
   full_name: string
   role: "admin" | "agent" | "user"
   avatar_url: string | null
+  created_at: Date
+  updated_at: Date
+}
+
+export type TargetBusinessGroup = {
+  id: number
+  name: string
+  description: string | null
   created_at: Date
   updated_at: Date
 }
@@ -33,6 +91,8 @@ export type Ticket = {
   subcategory_id: number | null
   business_unit_group_id: number | null
   initiator_group: string | null
+  target_business_group_id: number | null
+  assignee_group_id: number | null
   estimated_duration: string | null
   assigned_to: number | null
   created_by: number

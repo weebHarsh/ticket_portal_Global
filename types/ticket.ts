@@ -28,6 +28,8 @@ export interface Ticket {
   subcategory_id: number | null
   business_unit_group_id: number | null
   initiator_group: string | null
+  target_business_group_id: number | null
+  assignee_group_id: number | null
 
   // Assignment and ownership
   assigned_to: number | null
@@ -86,6 +88,8 @@ export interface TicketWithDetails extends Ticket {
   category_name: string | null
   subcategory_name: string | null
   group_name: string | null
+  target_business_group_name: string | null
+  assignee_group_name: string | null
   project_name: string | null
 
   // Redirection names (from joins)
@@ -105,7 +109,7 @@ export interface TicketWithDetails extends Ticket {
  */
 export interface CreateTicketInput {
   ticketType: "support" | "requirement"
-  businessUnitGroupId: number
+  targetBusinessGroupId: number
   projectName?: string
   projectId?: number | null
   categoryId: number | null

@@ -56,12 +56,23 @@ export const authOptions: NextAuthOptions = {
 
         if (!result.success || !result.user) {
           console.error("Failed to find or create SSO user:", result.error)
+          // Check if it's a database connection error
+          const errorMsg = result.error || ""
+          if (errorMsg.includes("fetch failed") || errorMsg.includes("ECONNREFUSED") || errorMsg.includes("DATABASE_URL")) {
+            console.error("Database connection error during SSO authentication")
+            // Return false but NextAuth will show AccessDenied - we'll handle this in the error page
+          }
           return false
         }
 
         return true
       } catch (err) {
         console.error("signIn callback error:", err)
+        const errorMessage = err instanceof Error ? err.message : "Unknown error"
+        // Check if it's a database connection error
+        if (errorMessage.includes("fetch failed") || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("DATABASE_URL")) {
+          console.error("Database connection error during SSO authentication:", errorMessage)
+        }
         return false
       }
     },

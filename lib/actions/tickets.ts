@@ -51,6 +51,9 @@ export async function getTickets(filters?: {
   parentTicketId?: number | null
   hasChildren?: boolean
   targetBusinessGroup?: string
+  initiator?: string
+  initiatorGroup?: string
+  project?: string
 }) {
   try {
     // Fetch all non-deleted tickets - filtering done client-side for flexibility
@@ -58,11 +61,16 @@ export async function getTickets(filters?: {
       SELECT
         t.*,
         u.full_name as creator_name,
+        u.business_unit_group_id as creator_business_unit_group_id,
         a.full_name as assignee_name,
+        a.business_unit_group_id as assignee_business_unit_group_id,
         spoc.full_name as spoc_name,
         c.name as category_name,
         sc.name as subcategory_name,
         bug.name as group_name,
+        tbg.name as target_business_group_name,
+        assignee_bug.name as assignee_group_name,
+        initiator_bug.name as initiator_group_name,
         p.name as project_name,
         closer.full_name as closed_by_name,
         holder.full_name as hold_by_name,
@@ -77,6 +85,9 @@ export async function getTickets(filters?: {
       LEFT JOIN categories c ON t.category_id = c.id
       LEFT JOIN subcategories sc ON t.subcategory_id = sc.id
       LEFT JOIN business_unit_groups bug ON t.business_unit_group_id = bug.id
+      LEFT JOIN target_business_groups tbg ON t.target_business_group_id = tbg.id
+      LEFT JOIN business_unit_groups assignee_bug ON t.assignee_group_id = assignee_bug.id
+      LEFT JOIN business_unit_groups initiator_bug ON u.business_unit_group_id = initiator_bug.id
       LEFT JOIN projects p ON t.project_id = p.id
       LEFT JOIN users closer ON t.closed_by = closer.id
       LEFT JOIN users holder ON t.hold_by = holder.id
@@ -125,8 +136,13 @@ export async function getTickets(filters?: {
     }
 
     // Filter by internal vs customer tickets
+    // Internal tickets: creator's business_unit_group_id is not null (user belongs to a business unit)
+    // Customer tickets: creator's business_unit_group_id is null (external customer)
     if (filters?.isInternal !== undefined) {
-      filteredTickets = filteredTickets.filter(t => t.is_internal === filters.isInternal)
+      filteredTickets = filteredTickets.filter(t => {
+        const isInternal = t.creator_business_unit_group_id !== null && t.creator_business_unit_group_id !== undefined
+        return isInternal === filters.isInternal
+      })
     }
 
     // Filter by parent ticket (for sub-tickets)
@@ -150,9 +166,24 @@ export async function getTickets(filters?: {
       filteredTickets = filteredTickets.filter(t => parentTicketIds.has(t.id))
     }
 
-    // Filter by target business group (for internal tickets)
+    // Filter by target business group
     if (filters?.targetBusinessGroup) {
-      filteredTickets = filteredTickets.filter(t => t.group_name === filters.targetBusinessGroup)
+      filteredTickets = filteredTickets.filter(t => t.target_business_group_name === filters.targetBusinessGroup)
+    }
+
+    // Filter by initiator
+    if (filters?.initiator) {
+      filteredTickets = filteredTickets.filter(t => t.creator_name === filters.initiator)
+    }
+
+    // Filter by initiator group
+    if (filters?.initiatorGroup) {
+      filteredTickets = filteredTickets.filter(t => t.initiator_group_name === filters.initiatorGroup)
+    }
+
+    // Filter by project
+    if (filters?.project) {
+      filteredTickets = filteredTickets.filter(t => t.project_name === filters.project)
     }
 
     return { success: true, data: filteredTickets }
@@ -173,17 +204,23 @@ export async function getTicketById(id: number) {
         t.*,
         u.full_name as creator_name,
         u.email as creator_email,
+        u.business_unit_group_id as creator_business_unit_group_id,
         a.full_name as assignee_name,
         a.email as assignee_email,
+        a.business_unit_group_id as assignee_business_unit_group_id,
         spoc.full_name as spoc_name,
         spoc.email as spoc_email,
         bug.name as group_name,
+        tbg.name as target_business_group_name,
+        assignee_bug.name as assignee_group_name,
         c.full_name as closed_by_name
       FROM tickets t
       LEFT JOIN users u ON t.created_by = u.id
       LEFT JOIN users a ON t.assigned_to = a.id
       LEFT JOIN users spoc ON t.spoc_user_id = spoc.id
       LEFT JOIN business_unit_groups bug ON t.business_unit_group_id = bug.id
+      LEFT JOIN target_business_groups tbg ON t.target_business_group_id = tbg.id
+      LEFT JOIN business_unit_groups assignee_bug ON t.assignee_group_id = assignee_bug.id
       LEFT JOIN users c ON t.closed_by = c.id
       WHERE t.id = ${id}
     `
@@ -226,7 +263,7 @@ export async function getTicketById(id: number) {
 
 export async function createTicket(data: {
   ticketType: string
-  businessUnitGroupId: number
+  targetBusinessGroupId: number
   projectName?: string
   projectId?: number | null
   categoryId: number | null
@@ -239,11 +276,27 @@ export async function createTicket(data: {
   estimatedReleaseDate?: string | null
   isInternal?: boolean
   parentTicketId?: number | null
+  assignedTo?: number | null
 }) {
   try {
     const currentUser = await getCurrentUser()
     if (!currentUser || !currentUser.id) {
       return { success: false, error: "User not authenticated" }
+    }
+
+    // Get creator's business_unit_group_id for initiator group
+    const creatorUser = await sql`
+      SELECT business_unit_group_id FROM users WHERE id = ${currentUser.id}
+    `
+    const creatorBusinessUnitGroupId = creatorUser[0]?.business_unit_group_id || null
+
+    // Get assignee's business_unit_group_id if assigned
+    let assigneeGroupId = null
+    if (data.assignedTo) {
+      const assigneeUser = await sql`
+        SELECT business_unit_group_id FROM users WHERE id = ${data.assignedTo}
+      `
+      assigneeGroupId = assigneeUser[0]?.business_unit_group_id || null
     }
 
     // Get next sequential ticket number
@@ -260,7 +313,8 @@ export async function createTicket(data: {
       INSERT INTO tickets (
         ticket_id, ticket_number, title, description, ticket_type, priority,
         status, created_by, assigned_to, spoc_user_id,
-        business_unit_group_id, project_name, project_id, category_id, subcategory_id,
+        business_unit_group_id, target_business_group_id, assignee_group_id,
+        project_name, project_id, category_id, subcategory_id,
         estimated_duration, product_release_name, estimated_release_date,
         is_internal, parent_ticket_id
       )
@@ -273,9 +327,11 @@ export async function createTicket(data: {
         ${"medium"},
         ${"open"},
         ${currentUser.id},
-        ${null},
+        ${data.assignedTo || null},
         ${data.spocId},
-        ${data.businessUnitGroupId},
+        ${creatorBusinessUnitGroupId},
+        ${data.targetBusinessGroupId},
+        ${assigneeGroupId},
         ${data.projectName || null},
         ${data.projectId || null},
         ${data.categoryId || null},
@@ -337,7 +393,7 @@ export async function createTicket(data: {
   }
 }
 
-export async function updateTicketStatus(ticketId: number, status: string) {
+export async function updateTicketStatus(ticketId: number, status: string, reason?: string, remarks?: string) {
   try {
     const currentUser = await getCurrentUser()
     if (!currentUser) {
@@ -429,6 +485,11 @@ export async function updateTicketStatus(ticketId: number, status: string) {
 
     // Log the status change to audit trail
     if (oldStatus !== status) {
+      const statusChangeNote = `Status changed from ${oldStatus} to ${status}`
+      const fullNotes = reason 
+        ? `${statusChangeNote}. Reason: ${reason}${remarks ? `. Remarks: ${remarks}` : ''}`
+        : statusChangeNote
+      
       await addAuditLog({
         ticketId,
         actionType: 'status_change',
@@ -436,6 +497,7 @@ export async function updateTicketStatus(ticketId: number, status: string) {
         newValue: status,
         performedBy: currentUser?.id || null,
         performedByName: currentUser?.full_name || 'System',
+        notes: fullNotes,
       })
     }
 
@@ -515,7 +577,7 @@ export async function updateTicket(
     description: string
     status: string
     priority: string
-    businessUnitGroupId: number
+    targetBusinessGroupId: number
     categoryId: number
     subcategoryId: number | null
     assigneeId: number
@@ -523,6 +585,15 @@ export async function updateTicket(
   },
 ) {
   try {
+    // Get assignee's business_unit_group_id if assigned
+    let assigneeGroupId = null
+    if (data.assigneeId) {
+      const assigneeUser = await sql`
+        SELECT business_unit_group_id FROM users WHERE id = ${data.assigneeId}
+      `
+      assigneeGroupId = assigneeUser[0]?.business_unit_group_id || null
+    }
+
     const result = await sql`
       UPDATE tickets 
       SET 
@@ -530,10 +601,11 @@ export async function updateTicket(
         description = ${data.description},
         status = ${data.status},
         priority = ${data.priority},
-        business_unit_group_id = ${data.businessUnitGroupId},
+        target_business_group_id = ${data.targetBusinessGroupId},
         category_id = ${data.categoryId},
         subcategory_id = ${data.subcategoryId},
         assigned_to = ${data.assigneeId},
+        assignee_group_id = ${assigneeGroupId},
         estimated_duration = ${data.estimatedDuration},
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ${ticketId}
@@ -625,7 +697,7 @@ export async function restoreTicket(ticketId: number) {
 
 export async function redirectTicket(
   ticketId: number,
-  newBusinessUnitGroupId: number,
+  newTargetBusinessGroupId: number,
   newSpocUserId: number,
   remarks: string
 ) {
@@ -639,10 +711,10 @@ export async function redirectTicket(
     const ticketBefore = await sql`
       SELECT 
         t.*,
-        bug.name as current_group_name,
+        tbg.name as current_target_business_group_name,
         spoc.full_name as current_spoc_name
       FROM tickets t
-      LEFT JOIN business_unit_groups bug ON t.business_unit_group_id = bug.id
+      LEFT JOIN target_business_groups tbg ON t.target_business_group_id = tbg.id
       LEFT JOIN users spoc ON t.spoc_user_id = spoc.id
       WHERE t.id = ${ticketId}
     `
@@ -661,9 +733,9 @@ export async function redirectTicket(
       return { success: false, error: "Only SPOC can redirect tickets" }
     }
 
-    // Get new group and SPOC names for audit trail
+    // Get new target business group and SPOC names for audit trail
     const newGroupResult = await sql`
-      SELECT name FROM business_unit_groups WHERE id = ${newBusinessUnitGroupId}
+      SELECT name FROM target_business_groups WHERE id = ${newTargetBusinessGroupId}
     `
     const newSpocResult = await sql`
       SELECT full_name FROM users WHERE id = ${newSpocUserId}
@@ -676,9 +748,9 @@ export async function redirectTicket(
     await sql`
       UPDATE tickets
       SET 
-        business_unit_group_id = ${newBusinessUnitGroupId},
+        target_business_group_id = ${newTargetBusinessGroupId},
         spoc_user_id = ${newSpocUserId},
-        redirected_from_business_unit_group_id = ${ticket.business_unit_group_id},
+        redirected_from_business_unit_group_id = ${ticket.target_business_group_id},
         redirected_from_spoc_user_id = ${ticket.spoc_user_id},
         redirection_remarks = ${remarks},
         redirected_at = CURRENT_TIMESTAMP,
@@ -690,7 +762,7 @@ export async function redirectTicket(
     await addAuditLog({
       ticketId,
       actionType: 'redirection',
-      oldValue: `${ticket.current_group_name || 'Unknown'} (${ticket.current_spoc_name || 'Unknown SPOC'})`,
+      oldValue: `${ticket.current_target_business_group_name || 'Unknown'} (${ticket.current_spoc_name || 'Unknown SPOC'})`,
       newValue: `${newGroupName} (${newSpocName})`,
       performedBy: currentUser.id,
       performedByName: currentUser.full_name || currentUser.email,
@@ -736,9 +808,20 @@ export async function updateTicketAssignee(ticketId: number, assigneeId: number)
       WHERE t.id = ${ticketId}
     `
 
+    // Get assignee's business_unit_group_id if assigned
+    let assigneeGroupId = null
+    if (assigneeId) {
+      const assigneeUser = await sql`
+        SELECT business_unit_group_id FROM users WHERE id = ${assigneeId}
+      `
+      assigneeGroupId = assigneeUser[0]?.business_unit_group_id || null
+    }
+
     await sql`
       UPDATE tickets
-      SET assigned_to = ${assigneeId}, updated_at = CURRENT_TIMESTAMP
+      SET assigned_to = ${assigneeId}, 
+          assignee_group_id = ${assigneeGroupId},
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = ${ticketId}
     `
 

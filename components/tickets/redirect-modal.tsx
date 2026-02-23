@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react"
 import { X, Search, Building2, AlertCircle } from "lucide-react"
-import { getBusinessUnitGroups, getSpocForBusinessUnitGroup } from "@/lib/actions/master-data"
+import { getTargetBusinessGroups, getSpocForTargetBusinessGroup } from "@/lib/actions/master-data"
 
-interface BusinessUnitGroup {
+interface TargetBusinessGroup {
   id: number
   name: string
   description: string | null
@@ -13,7 +13,7 @@ interface BusinessUnitGroup {
 interface RedirectModalProps {
   isOpen: boolean
   onClose: () => void
-  onConfirm: (businessUnitGroupId: number, spocUserId: number, remarks: string) => void
+  onConfirm: (targetBusinessGroupId: number, spocUserId: number, remarks: string) => void
   currentBusinessUnitGroupId: number | null
   currentBusinessUnitGroupName: string | null
   ticketTitle: string
@@ -27,7 +27,7 @@ export default function RedirectModal({
   currentBusinessUnitGroupName,
   ticketTitle,
 }: RedirectModalProps) {
-  const [businessUnitGroups, setBusinessUnitGroups] = useState<BusinessUnitGroup[]>([])
+  const [targetBusinessGroups, setTargetBusinessGroups] = useState<TargetBusinessGroup[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
   const [selectedSpocId, setSelectedSpocId] = useState<number | null>(null)
@@ -39,7 +39,7 @@ export default function RedirectModal({
 
   useEffect(() => {
     if (isOpen) {
-      loadBusinessUnitGroups()
+      loadTargetBusinessGroups()
       setSearchTerm("")
       setSelectedGroupId(null)
       setSelectedSpocId(null)
@@ -49,15 +49,15 @@ export default function RedirectModal({
     }
   }, [isOpen])
 
-  const loadBusinessUnitGroups = async () => {
+  const loadTargetBusinessGroups = async () => {
     setLoading(true)
-    const result = await getBusinessUnitGroups()
+    const result = await getTargetBusinessGroups()
     if (result.success && result.data) {
-      // Filter out the current business unit group
-      const filteredGroups = (result.data as BusinessUnitGroup[]).filter(
-        (bu) => bu.id !== currentBusinessUnitGroupId
+      // Filter out the current target business group
+      const filteredGroups = (result.data as TargetBusinessGroup[]).filter(
+        (tbg) => tbg.id !== currentBusinessUnitGroupId
       )
-      setBusinessUnitGroups(filteredGroups)
+      setTargetBusinessGroups(filteredGroups)
     }
     setLoading(false)
   }
@@ -68,15 +68,15 @@ export default function RedirectModal({
     setSelectedSpocName("")
     setError("")
 
-    // Auto-load SPOC for selected group
+    // Auto-load SPOC for selected target business group
     setLoadingSpoc(true)
-    const spocResult = await getSpocForBusinessUnitGroup(groupId)
+    const spocResult = await getSpocForTargetBusinessGroup(groupId)
     if (spocResult.success && spocResult.data) {
       const spocData = spocResult.data as any
       setSelectedSpocId(spocData.id || spocData.spoc_user_id)
       setSelectedSpocName(spocData.full_name || spocData.spoc_name || "")
     } else {
-      setError("No SPOC found for the selected business group. Please assign a SPOC in master data.")
+      setError("No SPOC found for the selected target business group. Please assign a SPOC in master data.")
     }
     setLoadingSpoc(false)
   }
@@ -98,10 +98,6 @@ export default function RedirectModal({
     onConfirm(selectedGroupId, selectedSpocId, remarks.trim())
     onClose()
   }
-
-  const filteredGroups = businessUnitGroups.filter((bu) =>
-    bu.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
 
   if (!isOpen) return null
 
@@ -130,7 +126,7 @@ export default function RedirectModal({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Current Business Group Info */}
+          {/* Current Target Business Group Info */}
           {currentBusinessUnitGroupName && (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
               <p className="text-sm text-foreground">
@@ -152,7 +148,7 @@ export default function RedirectModal({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search business groups..."
+              placeholder="Search target business groups..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary text-sm"
@@ -160,7 +156,7 @@ export default function RedirectModal({
             />
           </div>
 
-          {/* Business Group List */}
+          {/* Target Business Group List */}
           <div>
             <label className="block text-sm font-medium text-foreground mb-2">
               Select New Target Business Group *
@@ -170,36 +166,40 @@ export default function RedirectModal({
                 <div className="flex items-center justify-center h-32">
                   <p className="text-sm text-muted-foreground">Loading groups...</p>
                 </div>
-              ) : filteredGroups.length === 0 ? (
+              ) : targetBusinessGroups.filter((tbg) =>
+                  tbg.name?.toLowerCase().includes(searchTerm.toLowerCase())
+                ).length === 0 ? (
                 <div className="flex items-center justify-center h-32">
-                  <p className="text-sm text-muted-foreground">No business groups found</p>
+                  <p className="text-sm text-muted-foreground">No target business groups found</p>
                 </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {filteredGroups.map((group) => (
-                    <button
-                      key={group.id}
-                      onClick={() => handleGroupSelect(group.id)}
-                      className={`w-full px-4 py-3 text-left hover:bg-surface dark:hover:bg-gray-700 transition-colors ${
-                        selectedGroupId === group.id ? "bg-primary/10 dark:bg-primary/20 border-l-4 border-primary" : ""
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Building2 className="w-4 h-4 text-muted-foreground" />
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-foreground">{group.name}</p>
-                          {group.description && (
-                            <p className="text-xs text-muted-foreground mt-0.5">{group.description}</p>
+                  {targetBusinessGroups
+                    .filter((tbg) => tbg.name?.toLowerCase().includes(searchTerm.toLowerCase()))
+                    .map((group) => (
+                      <button
+                        key={group.id}
+                        onClick={() => handleGroupSelect(group.id)}
+                        className={`w-full px-4 py-3 text-left hover:bg-surface dark:hover:bg-gray-700 transition-colors ${
+                          selectedGroupId === group.id ? "bg-primary/10 dark:bg-primary/20 border-l-4 border-primary" : ""
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Building2 className="w-4 h-4 text-muted-foreground" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-foreground">{group.name}</p>
+                            {group.description && (
+                              <p className="text-xs text-muted-foreground mt-0.5">{group.description}</p>
+                            )}
+                          </div>
+                          {selectedGroupId === group.id && (
+                            <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                              <div className="w-2 h-2 rounded-full bg-white" />
+                            </div>
                           )}
                         </div>
-                        {selectedGroupId === group.id && (
-                          <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-                            <div className="w-2 h-2 rounded-full bg-white" />
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    ))}
                 </div>
               )}
             </div>
@@ -217,12 +217,12 @@ export default function RedirectModal({
                 </div>
               ) : selectedSpocName ? (
                 <div className="px-4 py-2.5 border border-border rounded-lg bg-green-50 dark:bg-green-900/20">
-                  <p className="text-sm font-medium text-foreground">{selectedSpocName}</p>
+                  <p className="text-sm font-medium text-foreground">SPOC: {selectedSpocName}</p>
                 </div>
               ) : (
                 <div className="px-4 py-2.5 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50 dark:bg-amber-900/20">
                   <p className="text-sm text-amber-700 dark:text-amber-300">
-                    No SPOC found for this group
+                    No SPOC found for this target business group
                   </p>
                 </div>
               )}

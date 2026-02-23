@@ -20,18 +20,21 @@ export async function POST(request: NextRequest) {
     // console.log(`[Login API] Login successful for: ${email}`)
     return NextResponse.json({ user: result.user }, { status: 200 })
   } catch (error) {
-    // console.error("[Login API] Route error:", error)
+    console.error("[Login API] Route error:", error)
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     const errorStack = error instanceof Error ? error.stack : undefined
-    // console.error("[Login API] Error details:", errorMessage)
-    if (errorStack) {
-      // console.error("[Login API] Error stack:", errorStack)
+    
+    // Provide more specific error messages
+    let userFriendlyError = "Internal server error"
+    if (errorMessage.includes("fetch failed") || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("ENOTFOUND")) {
+      userFriendlyError = "Database connection failed. Please check your database configuration or contact support."
+    } else if (errorMessage.includes("DATABASE_URL")) {
+      userFriendlyError = "Database configuration error. Please check your environment variables."
     }
     
-    // Return 500 for server errors, not 401
     return NextResponse.json(
       { 
-        error: "Internal server error",
+        error: userFriendlyError,
         details: process.env.NODE_ENV === "development" ? errorMessage : undefined
       },
       { status: 500 }

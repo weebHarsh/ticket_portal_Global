@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Plus, Edit, Trash2, ChevronDown, ChevronRight, Upload, Download } from "lucide-react"
 import {
+  getTargetBusinessGroups,
   getBusinessUnitGroups,
   getCategories,
   getSubcategories,
@@ -45,13 +46,15 @@ type Subcategory = {
 
 type ClassificationMapping = {
   id: number
-  business_unit_group_id: number
+  target_business_group_id: number
+  target_business_group_name?: string
   category_id: number
   subcategory_id: number
   estimated_duration: number
   spoc_user_id?: number
   spoc_name?: string
   auto_title_template?: string
+  description?: string
 }
 
 type User = {
@@ -61,6 +64,7 @@ type User = {
 }
 
 export default function UnifiedMasterData() {
+  const [targetBusinessGroups, setTargetBusinessGroups] = useState<BusinessUnit[]>([])
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [subcategories, setSubcategories] = useState<Subcategory[]>([])
@@ -80,7 +84,8 @@ export default function UnifiedMasterData() {
 
   const loadData = async () => {
     setLoading(true)
-    const [buResult, catResult, subcatResult, mappingResult, usersResult] = await Promise.all([
+    const [tbgResult, buResult, catResult, subcatResult, mappingResult, usersResult] = await Promise.all([
+      getTargetBusinessGroups(),
       getBusinessUnitGroups(),
       getCategories(),
       getSubcategories(),
@@ -88,6 +93,7 @@ export default function UnifiedMasterData() {
       getUsers(),
     ])
 
+    if (tbgResult.success) setTargetBusinessGroups(tbgResult.data || [])
     if (buResult.success) setBusinessUnits(buResult.data || [])
     if (catResult.success) setCategories(catResult.data || [])
     if (subcatResult.success) setSubcategories(subcatResult.data || [])
@@ -126,10 +132,10 @@ export default function UnifiedMasterData() {
     return subcategories.filter((sub) => sub.category_id === categoryId)
   }
 
-  const getMapping = (buId: number, catId: number, subcatId: number) => {
+  const getMapping = (tbgId: number, catId: number, subcatId: number) => {
     return mappings.find(
       (m) =>
-        m.business_unit_group_id === buId && m.category_id === catId && m.subcategory_id === subcatId
+        m.target_business_group_id === tbgId && m.category_id === catId && m.subcategory_id === subcatId
     )
   }
 
@@ -223,12 +229,13 @@ export default function UnifiedMasterData() {
   // Mapping handlers
   const handleCreateMapping = async (formData: any) => {
     const result = await createTicketClassificationMapping(
-      Number(formData.business_unit_group_id),
+      Number(formData.target_business_group_id),
       Number(formData.category_id),
       Number(formData.subcategory_id),
       Number(formData.estimated_duration),
       formData.spoc_user_id ? Number(formData.spoc_user_id) : undefined,
-      formData.auto_title_template
+      formData.auto_title_template,
+      formData.description
     )
     if (result.success) {
       await loadData()
@@ -295,41 +302,33 @@ export default function UnifiedMasterData() {
       </div>
 
       <div className="space-y-2">
-        {businessUnits.map((bu) => (
-          <div key={bu.id} className="border border-border rounded-lg">
-            {/* Business Unit Header */}
+        {targetBusinessGroups.map((tbg) => (
+          <div key={tbg.id} className="border border-border rounded-lg">
+            {/* Target Business Group Header */}
             <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-t-lg">
               <div className="flex items-center gap-2 flex-1">
-                <button onClick={() => toggleBU(bu.id)} className="hover:bg-white/50 rounded p-1">
-                  {expandedBUs.has(bu.id) ? (
+                <button onClick={() => toggleBU(tbg.id)} className="hover:bg-white/50 rounded p-1">
+                  {expandedBUs.has(tbg.id) ? (
                     <ChevronDown className="w-5 h-5" />
                   ) : (
                     <ChevronRight className="w-5 h-5" />
                   )}
                 </button>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-foreground">{bu.name}</h3>
-                  {bu.description && (
-                    <p className="text-sm text-foreground-secondary">{bu.description}</p>
+                  <h3 className="font-semibold text-foreground">{tbg.name}</h3>
+                  {tbg.description && (
+                    <p className="text-sm text-foreground-secondary">{tbg.description}</p>
                   )}
                 </div>
               </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setEditBU(bu)}>
-                  <Edit className="w-4 h-4" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => handleDeleteBU(bu.id)}>
-                  <Trash2 className="w-4 h-4 text-red-500" />
-                </Button>
-              </div>
             </div>
 
-            {/* Categories under this Business Unit */}
-            {expandedBUs.has(bu.id) && (
+            {/* Categories under this Target Business Group */}
+            {expandedBUs.has(tbg.id) && (
               <div className="p-4 space-y-2">
                 {categories.map((category) => {
                   const subcats = getSubcategoriesForCategory(category.id)
-                  const key = `${bu.id}-${category.id}`
+                  const key = `${tbg.id}-${category.id}`
 
                   return (
                     <div key={category.id} className="border border-border rounded-lg ml-8">
@@ -337,7 +336,7 @@ export default function UnifiedMasterData() {
                       <div className="flex items-center justify-between p-3 bg-gray-50">
                         <div className="flex items-center gap-2 flex-1">
                           <button
-                            onClick={() => toggleCategory(bu.id, category.id)}
+                            onClick={() => toggleCategory(tbg.id, category.id)}
                             className="hover:bg-white rounded p-1"
                           >
                             {expandedCategories.has(key) ? (
@@ -382,7 +381,7 @@ export default function UnifiedMasterData() {
                         <div className="p-3 space-y-2">
                           {subcats.length > 0 ? (
                             subcats.map((subcat) => {
-                              const mapping = getMapping(bu.id, category.id, subcat.id)
+                              const mapping = getMapping(tbg.id, category.id, subcat.id)
 
                               return (
                                 <div
@@ -450,12 +449,13 @@ export default function UnifiedMasterData() {
                                           onClick={() =>
                                             setEditMapping({
                                               id: null,
-                                              business_unit_group_id: bu.id,
+                                              target_business_group_id: tbg.id,
                                               category_id: category.id,
                                               subcategory_id: subcat.id,
                                               estimated_duration: "",
                                               spoc_user_id: "",
                                               auto_title_template: "",
+                                              description: "",
                                             })
                                           }
                                         >
@@ -559,11 +559,11 @@ export default function UnifiedMasterData() {
           title={editMapping.id ? "Edit Classification Mapping" : "Add Classification Mapping"}
           fields={[
             {
-              name: "business_unit_group_id",
-              label: "Business Unit",
+              name: "target_business_group_id",
+              label: "Target Business Group",
               type: "select",
               required: true,
-              options: businessUnits.map((bu) => ({ value: bu.id, label: bu.name })),
+              options: targetBusinessGroups.map((tbg) => ({ value: tbg.id, label: tbg.name })),
               disabled: !!editMapping.id,
             },
             {
@@ -595,6 +595,7 @@ export default function UnifiedMasterData() {
               options: users.map((user) => ({ value: user.id, label: user.name })),
             },
             { name: "auto_title_template", label: "Auto Title Template", type: "text" },
+            { name: "description", label: "Description", type: "textarea" },
           ]}
           initialData={editMapping}
           onSave={(data) =>

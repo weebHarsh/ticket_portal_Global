@@ -17,13 +17,21 @@ interface BusinessUnitGroup {
   description: string | null
 }
 
+interface Ticket {
+  id: number
+  creator_name: string | null
+  initiator_group_name: string | null
+  project_name: string | null
+}
+
 interface TicketsFilterProps {
   onFilterChange: (filters: any) => void
   onExport?: () => void
   isInternal?: boolean
+  tickets?: Ticket[]
 }
 
-export default function TicketsFilter({ onFilterChange, onExport, isInternal = false }: TicketsFilterProps) {
+export default function TicketsFilter({ onFilterChange, onExport, isInternal = false, tickets = [] }: TicketsFilterProps) {
   const [showFilters, setShowFilters] = useState(false)
   const [userId, setUserId] = useState<number | null>(null)
   const [users, setUsers] = useState<User[]>([])
@@ -38,7 +46,15 @@ export default function TicketsFilter({ onFilterChange, onExport, isInternal = f
     search: "",
     myTeam: false,
     targetBusinessGroup: "",
+    initiator: "",
+    initiatorGroup: "",
+    project: "",
   })
+
+  // Extract unique values from current tickets for filter dropdowns
+  const uniqueInitiators = Array.from(new Set(tickets.map(t => t.creator_name).filter(Boolean))).sort()
+  const uniqueInitiatorGroups = Array.from(new Set(tickets.map(t => t.initiator_group_name).filter(Boolean))).sort()
+  const uniqueProjects = Array.from(new Set(tickets.map(t => t.project_name).filter(Boolean))).sort()
 
   useEffect(() => {
     try {
@@ -64,20 +80,10 @@ export default function TicketsFilter({ onFilterChange, onExport, isInternal = f
   }
 
   const loadBusinessUnitGroups = async () => {
-    const result = await getBusinessUnitGroups()
+    const { getTargetBusinessGroups } = await import("@/lib/actions/master-data")
+    const result = await getTargetBusinessGroups()
     if (result.success && result.data) {
-      // Filter to only internal support groups
-      const internalGroups = (result.data as BusinessUnitGroup[]).filter((bu) =>
-        [
-          "Tech Support",
-          "DevOps Support",
-          "Integration Support",
-          "GUI Support",
-          "Central Team Support",
-          "Product Team Support",
-        ].includes(bu.name)
-      )
-      setBusinessUnitGroups(internalGroups)
+      setBusinessUnitGroups(result.data as BusinessUnitGroup[])
     }
   }
 
@@ -99,6 +105,9 @@ export default function TicketsFilter({ onFilterChange, onExport, isInternal = f
       search: "",
       myTeam: false,
       targetBusinessGroup: "",
+      initiator: "",
+      initiatorGroup: "",
+      project: "",
     }
     setFilters(resetFilters)
     onFilterChange(resetFilters)
@@ -131,6 +140,9 @@ export default function TicketsFilter({ onFilterChange, onExport, isInternal = f
     filters.assignee,
     filters.myTeam,
     filters.targetBusinessGroup,
+    filters.initiator,
+    filters.initiatorGroup,
+    filters.project,
   ].filter(Boolean).length
 
   return (
@@ -209,7 +221,7 @@ export default function TicketsFilter({ onFilterChange, onExport, isInternal = f
       {/* Expanded Filters */}
       {showFilters && (
         <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-8 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {/* Status */}
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">Status</label>
@@ -313,6 +325,57 @@ export default function TicketsFilter({ onFilterChange, onExport, isInternal = f
                 </select>
               </div>
             )}
+
+            {/* Initiator Filter */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">Initiator</label>
+              <select
+                value={filters.initiator}
+                onChange={(e) => setFilters({ ...filters, initiator: e.target.value })}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+              >
+                <option value="">All Initiators</option>
+                {uniqueInitiators.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Initiator Group Filter */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">Initiator Group</label>
+              <select
+                value={filters.initiatorGroup}
+                onChange={(e) => setFilters({ ...filters, initiatorGroup: e.target.value })}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+              >
+                <option value="">All Groups</option>
+                {uniqueInitiatorGroups.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Project Filter */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">Project</label>
+              <select
+                value={filters.project}
+                onChange={(e) => setFilters({ ...filters, project: e.target.value })}
+                className="w-full px-4 py-2.5 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-sm"
+              >
+                <option value="">All Projects</option>
+                {uniqueProjects.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             {/* Reset All Button */}
             <div className="flex items-end">

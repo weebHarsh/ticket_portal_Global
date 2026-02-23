@@ -16,6 +16,63 @@ export async function getBusinessUnitGroups() {
   }
 }
 
+// Target Business Groups
+export async function getTargetBusinessGroups(organizationId?: number) {
+  try {
+    let result
+    if (organizationId) {
+      // Filter by organization if provided
+      result = await sql`
+        SELECT DISTINCT tbg.*
+        FROM target_business_groups tbg
+        INNER JOIN organization_target_business_group_mapping otbgm ON tbg.id = otbgm.target_business_group_id
+        WHERE otbgm.organization_id = ${organizationId}
+        ORDER BY tbg.name ASC
+      `
+    } else {
+      // Get all target business groups
+      result = await sql`
+        SELECT * FROM target_business_groups
+        ORDER BY name ASC
+      `
+    }
+    return { success: true, data: result }
+  } catch (error) {
+    console.error("Error fetching target business groups:", error)
+    return { success: false, error: "Failed to fetch target business groups", data: [] }
+  }
+}
+
+// Organizations
+export async function getOrganizations() {
+  try {
+    const result = await sql`
+      SELECT * FROM organizations
+      ORDER BY name ASC
+    `
+    return { success: true, data: result }
+  } catch (error) {
+    console.error("Error fetching organizations:", error)
+    return { success: false, error: "Failed to fetch organizations", data: [] }
+  }
+}
+
+export async function getTargetBusinessGroupsByOrganization(organizationId: number) {
+  try {
+    const result = await sql`
+      SELECT DISTINCT tbg.*
+      FROM target_business_groups tbg
+      INNER JOIN organization_target_business_group_mapping otbgm ON tbg.id = otbgm.target_business_group_id
+      WHERE otbgm.organization_id = ${organizationId}
+      ORDER BY tbg.name ASC
+    `
+    return { success: true, data: result }
+  } catch (error) {
+    console.error("Error fetching target business groups by organization:", error)
+    return { success: false, error: "Failed to fetch target business groups", data: [] }
+  }
+}
+
 export async function createBusinessUnitGroup(name: string, description?: string, spocName?: string) {
   try {
     const trimmedName = name.trim()
@@ -267,16 +324,16 @@ export async function getTicketClassificationMappings() {
     const result = await sql`
       SELECT 
         tcm.*,
-        bu.name as business_unit_group_name,
+        tbg.name as target_business_group_name,
         c.name as category_name,
         s.name as subcategory_name,
         u.full_name as spoc_name
       FROM ticket_classification_mapping tcm
-      JOIN business_unit_groups bu ON tcm.business_unit_group_id = bu.id
+      JOIN target_business_groups tbg ON tcm.target_business_group_id = tbg.id
       JOIN categories c ON tcm.category_id = c.id
       JOIN subcategories s ON tcm.subcategory_id = s.id
       LEFT JOIN users u ON tcm.spoc_user_id = u.id
-      ORDER BY bu.name, c.name, s.name
+      ORDER BY tbg.name, c.name, s.name
     `
     return { success: true, data: result }
   } catch (error) {
@@ -286,10 +343,10 @@ export async function getTicketClassificationMappings() {
 }
 
 /**
- * Get SPOC user ID for a business unit group from ticket_classification_mapping
+ * Get SPOC user ID for a target business group from ticket_classification_mapping
  * Returns the most common SPOC for the group, or the first one found
  */
-export async function getSpocForBusinessUnitGroup(businessUnitGroupId: number) {
+export async function getSpocForTargetBusinessGroup(targetBusinessGroupId: number) {
   try {
     const result = await sql`
       SELECT 
@@ -300,7 +357,7 @@ export async function getSpocForBusinessUnitGroup(businessUnitGroupId: number) {
         COUNT(*) as mapping_count
       FROM ticket_classification_mapping tcm
       LEFT JOIN users u ON tcm.spoc_user_id = u.id
-      WHERE tcm.business_unit_group_id = ${businessUnitGroupId}
+      WHERE tcm.target_business_group_id = ${targetBusinessGroupId}
         AND tcm.spoc_user_id IS NOT NULL
       GROUP BY tcm.spoc_user_id, u.id, u.full_name, u.email
       ORDER BY mapping_count DESC, u.id ASC
@@ -318,7 +375,33 @@ export async function getSpocForBusinessUnitGroup(businessUnitGroupId: number) {
       }
     }
     
-    return { success: false, error: "No SPOC found for this business unit group", data: null }
+    return { success: false, error: "No SPOC found for this target business group", data: null }
+  } catch (error) {
+    console.error("Error fetching SPOC for target business group:", error)
+    return { success: false, error: "Failed to fetch SPOC", data: null }
+  }
+}
+
+/**
+ * Get SPOC user ID for a business unit group from ticket_classification_mapping
+ * DEPRECATED: Use getSpocForTargetBusinessGroup instead
+ * Kept for backward compatibility
+ */
+export async function getSpocForBusinessUnitGroup(businessUnitGroupId: number) {
+  // Try to find matching target business group by name
+  try {
+    const bugResult = await sql`
+      SELECT name FROM business_unit_groups WHERE id = ${businessUnitGroupId}
+    `
+    if (bugResult.length > 0) {
+      const tbgResult = await sql`
+        SELECT id FROM target_business_groups WHERE name = ${bugResult[0].name}
+      `
+      if (tbgResult.length > 0) {
+        return getSpocForTargetBusinessGroup(tbgResult[0].id)
+      }
+    }
+    return { success: false, error: "No matching target business group found", data: null }
   } catch (error) {
     console.error("Error fetching SPOC for business unit group:", error)
     return { success: false, error: "Failed to fetch SPOC", data: null }
@@ -326,18 +409,19 @@ export async function getSpocForBusinessUnitGroup(businessUnitGroupId: number) {
 }
 
 export async function createTicketClassificationMapping(
-  businessUnitGroupId: number,
+  targetBusinessGroupId: number,
   categoryId: number,
   subcategoryId: number,
   estimatedDuration: number,
   spocUserId?: number,
   autoTitleTemplate?: string,
+  description?: string,
 ) {
   try {
     const result = await sql`
       INSERT INTO ticket_classification_mapping 
-        (business_unit_group_id, category_id, subcategory_id, estimated_duration, spoc_user_id, auto_title_template)
-      VALUES (${businessUnitGroupId}, ${categoryId}, ${subcategoryId}, ${estimatedDuration}, ${spocUserId || null}, ${autoTitleTemplate || null})
+        (target_business_group_id, category_id, subcategory_id, estimated_duration, spoc_user_id, auto_title_template, description)
+      VALUES (${targetBusinessGroupId}, ${categoryId}, ${subcategoryId}, ${estimatedDuration}, ${spocUserId || null}, ${autoTitleTemplate || null}, ${description || null})
       RETURNING *
     `
     if (!result || result.length === 0) {
@@ -387,20 +471,20 @@ export async function deleteTicketClassificationMapping(id: number) {
   }
 }
 
-export async function getAutoTitleTemplate(businessUnitGroupId: number, categoryId: number, subcategoryId: number | null) {
+export async function getAutoTitleTemplate(targetBusinessGroupId: number, categoryId: number, subcategoryId: number | null) {
   try {
     const result = subcategoryId
       ? await sql`
-          SELECT auto_title_template, estimated_duration, spoc_user_id
+          SELECT auto_title_template, estimated_duration, spoc_user_id, description
           FROM ticket_classification_mapping
-          WHERE business_unit_group_id = ${businessUnitGroupId}
+          WHERE target_business_group_id = ${targetBusinessGroupId}
             AND category_id = ${categoryId}
             AND subcategory_id = ${subcategoryId}
         `
       : await sql`
-          SELECT auto_title_template, estimated_duration, spoc_user_id
+          SELECT auto_title_template, estimated_duration, spoc_user_id, description
           FROM ticket_classification_mapping
-          WHERE business_unit_group_id = ${businessUnitGroupId}
+          WHERE target_business_group_id = ${targetBusinessGroupId}
             AND category_id = ${categoryId}
           LIMIT 1
         `
@@ -408,6 +492,55 @@ export async function getAutoTitleTemplate(businessUnitGroupId: number, category
   } catch (error) {
     console.error("Error fetching auto title template:", error)
     return { success: false, error: "Failed to fetch template" }
+  }
+}
+
+/**
+ * Get classification mapping by target business group, category, and subcategory
+ */
+export async function getClassificationMappingByTargetBusinessGroup(
+  targetBusinessGroupId: number,
+  categoryId: number,
+  subcategoryId: number | null
+) {
+  try {
+    const result = subcategoryId
+      ? await sql`
+          SELECT 
+            tcm.*,
+            tbg.name as target_business_group_name,
+            c.name as category_name,
+            s.name as subcategory_name,
+            u.full_name as spoc_name
+          FROM ticket_classification_mapping tcm
+          JOIN target_business_groups tbg ON tcm.target_business_group_id = tbg.id
+          JOIN categories c ON tcm.category_id = c.id
+          JOIN subcategories s ON tcm.subcategory_id = s.id
+          LEFT JOIN users u ON tcm.spoc_user_id = u.id
+          WHERE tcm.target_business_group_id = ${targetBusinessGroupId}
+            AND tcm.category_id = ${categoryId}
+            AND tcm.subcategory_id = ${subcategoryId}
+        `
+      : await sql`
+          SELECT 
+            tcm.*,
+            tbg.name as target_business_group_name,
+            c.name as category_name,
+            s.name as subcategory_name,
+            u.full_name as spoc_name
+          FROM ticket_classification_mapping tcm
+          JOIN target_business_groups tbg ON tcm.target_business_group_id = tbg.id
+          JOIN categories c ON tcm.category_id = c.id
+          JOIN subcategories s ON tcm.subcategory_id = s.id
+          LEFT JOIN users u ON tcm.spoc_user_id = u.id
+          WHERE tcm.target_business_group_id = ${targetBusinessGroupId}
+            AND tcm.category_id = ${categoryId}
+          LIMIT 1
+        `
+    return { success: true, data: result && result.length > 0 ? result[0] : null }
+  } catch (error) {
+    console.error("Error fetching classification mapping:", error)
+    return { success: false, error: "Failed to fetch mapping", data: null }
   }
 }
 
@@ -452,42 +585,44 @@ export async function bulkUploadCategories(data: Array<{ name: string; descripti
 
 export async function bulkUploadTicketClassificationMappings(
   data: Array<{
-    businessUnitGroup: string
+    targetBusinessGroup: string
     category: string
     subcategory: string
     estimatedDuration: number
     spocEmail?: string
     autoTitleTemplate?: string
+    description?: string
   }>,
 ) {
   try {
     const results = []
     for (const item of data) {
       // Get IDs from names
-      const buResult = await sql`SELECT id FROM business_unit_groups WHERE name = ${item.businessUnitGroup}`
+      const tbgResult = await sql`SELECT id FROM target_business_groups WHERE name = ${item.targetBusinessGroup}`
       const catResult = await sql`SELECT id FROM categories WHERE name = ${item.category}`
       const subcatResult = await sql`
         SELECT id FROM subcategories 
         WHERE name = ${item.subcategory} 
-          AND category_id = ${catResult.rows[0]?.id}
+          AND category_id = ${catResult[0]?.id}
       `
 
       let spocUserId = null
       if (item.spocEmail) {
         const spocResult = await sql`SELECT id FROM users WHERE email = ${item.spocEmail}`
-        spocUserId = spocResult.rows[0]?.id
+        spocUserId = spocResult[0]?.id
       }
 
-      if (buResult.rows[0] && catResult.rows[0] && subcatResult.rows[0]) {
+      if (tbgResult[0] && catResult[0] && subcatResult[0]) {
         const result = await sql`
           INSERT INTO ticket_classification_mapping 
-            (business_unit_group_id, category_id, subcategory_id, estimated_duration, spoc_user_id, auto_title_template)
-          VALUES (${buResult.rows[0].id}, ${catResult.rows[0].id}, ${subcatResult.rows[0].id}, ${item.estimatedDuration}, ${spocUserId}, ${item.autoTitleTemplate || null})
-          ON CONFLICT (business_unit_group_id, category_id, subcategory_id) 
+            (target_business_group_id, category_id, subcategory_id, estimated_duration, spoc_user_id, auto_title_template, description)
+          VALUES (${tbgResult[0].id}, ${catResult[0].id}, ${subcatResult[0].id}, ${item.estimatedDuration}, ${spocUserId}, ${item.autoTitleTemplate || null}, ${item.description || null})
+          ON CONFLICT (target_business_group_id, category_id, subcategory_id) 
           DO UPDATE SET 
             estimated_duration = ${item.estimatedDuration},
             spoc_user_id = ${spocUserId},
-            auto_title_template = ${item.autoTitleTemplate || null}
+            auto_title_template = ${item.autoTitleTemplate || null},
+            description = ${item.description || null}
           RETURNING *
         `
         results.push(result[0])

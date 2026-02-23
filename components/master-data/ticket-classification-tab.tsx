@@ -9,7 +9,7 @@ import {
   updateTicketClassificationMapping,
   deleteTicketClassificationMapping,
   bulkUploadTicketClassificationMappings,
-  getBusinessUnitGroups,
+  getTargetBusinessGroups,
   getCategories,
   getSubcategories,
 } from "@/lib/actions/master-data"
@@ -19,7 +19,7 @@ import EditDialog from "./edit-dialog"
 
 export default function TicketClassificationTab() {
   const [data, setData] = useState<any[]>([])
-  const [businessUnits, setBusinessUnits] = useState<any[]>([])
+  const [targetBusinessGroups, setTargetBusinessGroups] = useState<any[]>([])
   const [categories, setCategories] = useState<any[]>([])
   const [subcategories, setSubcategories] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
@@ -29,16 +29,16 @@ export default function TicketClassificationTab() {
 
   const loadData = async () => {
     setLoading(true)
-    const [mappingResult, buResult, catResult, subcatResult, usersResult] = await Promise.all([
+    const [mappingResult, tbgResult, catResult, subcatResult, usersResult] = await Promise.all([
       getTicketClassificationMappings(),
-      getBusinessUnitGroups(),
+      getTargetBusinessGroups(),
       getCategories(),
       getSubcategories(),
       getUsers(),
     ])
 
     if (mappingResult.success) setData(mappingResult.data)
-    if (buResult.success) setBusinessUnits(buResult.data)
+    if (tbgResult.success) setTargetBusinessGroups(tbgResult.data)
     if (catResult.success) setCategories(catResult.data)
     if (subcatResult.success) setSubcategories(subcatResult.data)
     if (usersResult.success) setUsers(usersResult.data)
@@ -52,12 +52,13 @@ export default function TicketClassificationTab() {
 
   const handleCreate = async (formData: any) => {
     const result = await createTicketClassificationMapping(
-      Number(formData.business_unit_group_id),
+      Number(formData.target_business_group_id),
       Number(formData.category_id),
       Number(formData.subcategory_id),
       Number(formData.estimated_duration),
       formData.spoc_user_id ? Number(formData.spoc_user_id) : undefined,
       formData.auto_title_template,
+      formData.description,
     )
     if (result.success) {
       await loadData()
@@ -92,12 +93,13 @@ export default function TicketClassificationTab() {
 
   const handleBulkUpload = async (items: any[]) => {
     const formatted = items.map((item) => ({
-      businessUnitGroup: item.businessUnitGroup,
+      targetBusinessGroup: item.targetBusinessGroup || item.businessUnitGroup,
       category: item.category,
       subcategory: item.subcategory,
       estimatedDuration: Number(item.estimatedDuration),
       spocEmail: item.spocEmail,
       autoTitleTemplate: item.autoTitleTemplate,
+      description: item.description,
     }))
 
     const result = await bulkUploadTicketClassificationMappings(formatted)
@@ -112,9 +114,9 @@ export default function TicketClassificationTab() {
 
   const downloadSampleCSV = () => {
     const csv =
-      "businessUnitGroup,category,subcategory,estimatedDuration,spocEmail,autoTitleTemplate\n" +
-      "IT Operations,Technical Issue,AWS Infrastructure,120,john@example.com,[AWS Infrastructure] - Technical Issue\n" +
-      "Customer Support,Feature Request,UI Enhancement,180,jane@example.com,[UI Enhancement] - Feature Request"
+      "targetBusinessGroup,category,subcategory,estimatedDuration,spocEmail,autoTitleTemplate,description\n" +
+      "IT Operations,Technical Issue,AWS Infrastructure,120,john@example.com,[AWS Infrastructure] - Technical Issue,\n" +
+      "Customer Support,Feature Request,UI Enhancement,180,jane@example.com,[UI Enhancement] - Feature Request,"
     const blob = new Blob([csv], { type: "text/csv" })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -145,12 +147,13 @@ export default function TicketClassificationTab() {
             onClick={() =>
               setEditItem({
                 id: null,
-                business_unit_group_id: "",
+                target_business_group_id: "",
                 category_id: "",
                 subcategory_id: "",
                 estimated_duration: "",
                 spoc_user_id: "",
                 auto_title_template: "",
+                description: "",
               })
             }
             className="bg-gradient-to-r from-primary to-secondary"
@@ -165,7 +168,7 @@ export default function TicketClassificationTab() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="text-left py-3 px-4 font-semibold">Business Unit</th>
+              <th className="text-left py-3 px-4 font-semibold">Target Business Group</th>
               <th className="text-left py-3 px-4 font-semibold">Category</th>
               <th className="text-left py-3 px-4 font-semibold">Subcategory</th>
               <th className="text-left py-3 px-4 font-semibold">Duration (min)</th>
@@ -177,7 +180,7 @@ export default function TicketClassificationTab() {
           <tbody>
             {data.map((item) => (
               <tr key={item.id} className="border-b border-border hover:bg-surface">
-                <td className="py-3 px-4">{item.business_unit_group_name}</td>
+                <td className="py-3 px-4">{item.target_business_group_name}</td>
                 <td className="py-3 px-4">{item.category_name}</td>
                 <td className="py-3 px-4">{item.subcategory_name}</td>
                 <td className="py-3 px-4">{item.estimated_duration}</td>
@@ -203,12 +206,13 @@ export default function TicketClassificationTab() {
         <BulkUploadDialog
           title="Bulk Upload Ticket Classification Mappings"
           fields={[
-            "businessUnitGroup",
+            "targetBusinessGroup",
             "category",
             "subcategory",
             "estimatedDuration",
             "spocEmail",
             "autoTitleTemplate",
+            "description",
           ]}
           onUpload={handleBulkUpload}
           onClose={() => setShowBulkUpload(false)}
@@ -220,11 +224,11 @@ export default function TicketClassificationTab() {
           title={editItem.id ? "Edit Mapping" : "Add Mapping"}
           fields={[
             {
-              name: "business_unit_group_id",
-              label: "Business Unit Group",
+              name: "target_business_group_id",
+              label: "Target Business Group",
               type: "select",
               required: true,
-              options: businessUnits.map((bu) => ({ value: bu.id, label: bu.name })),
+              options: targetBusinessGroups.map((tbg) => ({ value: tbg.id, label: tbg.name })),
               disabled: !!editItem.id,
             },
             {
@@ -251,6 +255,7 @@ export default function TicketClassificationTab() {
               options: users.map((user) => ({ value: user.id, label: user.name })),
             },
             { name: "auto_title_template", label: "Auto Title Template", type: "text" },
+            { name: "description", label: "Description", type: "textarea" },
           ]}
           initialData={editItem}
           onSave={(data) => (editItem.id ? handleUpdate(editItem.id, data) : handleCreate(data))}

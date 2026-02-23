@@ -4,12 +4,13 @@ import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import DashboardLayout from "@/components/layout/dashboard-layout"
-import { ArrowLeft, Edit, MessageSquare, Paperclip, Clock, User, Calendar, Tag, Download, FileText, ListChecks, CheckCircle2, History, RefreshCw, UserPlus, FolderKanban, PauseCircle, PlayCircle, XCircle, PlusCircle, ArrowRightLeft, Building2, GitBranch } from "lucide-react"
+import { ArrowLeft, Edit, MessageSquare, Paperclip, Clock, User, Calendar, Tag, Download, FileText, ListChecks, CheckCircle2, History, RefreshCw, UserPlus, FolderKanban, PauseCircle, PlayCircle, XCircle, PlusCircle, ArrowRightLeft, Building2, GitBranch, Trash2 } from "lucide-react"
 import { getTicketById, updateTicketStatus, addComment, getTicketAuditLog, redirectTicket } from "@/lib/actions/tickets"
 import { getSubcategoryDetails } from "@/lib/actions/master-data"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import RedirectModal from "@/components/tickets/redirect-modal"
+import StatusChangeModal from "@/components/tickets/status-change-modal"
 
 export default function TicketDetailPage() {
   const params = useParams()
@@ -25,6 +26,9 @@ export default function TicketDetailPage() {
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [isRedirectModalOpen, setIsRedirectModalOpen] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
+  const [isStatusChangeModalOpen, setIsStatusChangeModalOpen] = useState(false)
+  const [selectedNewStatus, setSelectedNewStatus] = useState<string>("")
+  const [changingStatus, setChangingStatus] = useState(false)
 
   // Load current user from session or localStorage
   useEffect(() => {
@@ -79,11 +83,68 @@ export default function TicketDetailPage() {
     setLoading(false)
   }
 
-  const handleStatusChange = async (newStatus: string) => {
-    const result = await updateTicketStatus(Number(ticketId), newStatus)
+  const openStatusChangeModal = (newStatus: string) => {
+    setSelectedNewStatus(newStatus)
+    setIsStatusChangeModalOpen(true)
+  }
+
+  const handleStatusChangeConfirm = async (reason: string, remarks: string) => {
+    setChangingStatus(true)
+    const result = await updateTicketStatus(Number(ticketId), selectedNewStatus, reason, remarks)
+    setChangingStatus(false)
+
     if (result.success) {
+      setIsStatusChangeModalOpen(false)
+      setSelectedNewStatus("")
       await loadTicket()
+    } else {
+      alert("Failed to update status: " + (result.error || "Unknown error"))
     }
+  }
+
+  // Get available status options based on user role
+  const getAvailableStatusOptions = (): string[] => {
+    if (!currentUser || !ticket) return []
+    if (ticket.is_deleted || ticket.status === "deleted") return []
+
+    const userId = Number(currentUser.id)
+    const isAdmin = currentUser.role?.toLowerCase() === "admin"
+    const isInitiator = userId === ticket.created_by
+    const isAssignee = userId === ticket.assigned_to
+    const isSPOC = userId === ticket.spoc_user_id
+    const currentStatus = ticket.status
+
+    const options: string[] = []
+
+    if (isAdmin) {
+      return ["open", "on-hold", "resolved", "closed", "returned", "deleted"]
+    }
+
+    // SPOC: Can change to On-hold, Resolved, or Open (if currently On-hold/Resolved)
+    if (isSPOC) {
+      options.push("on-hold", "resolved")
+      if (currentStatus === "on-hold" || currentStatus === "resolved") {
+        options.push("open")
+      }
+    }
+
+    // Assignee: Can change to Resolved or Open (if currently Resolved)
+    if (isAssignee) {
+      options.push("resolved")
+      if (currentStatus === "resolved") {
+        options.push("open")
+      }
+    }
+
+    // Initiator: Can change to Closed, Delete, or Open (if currently Resolved)
+    if (isInitiator) {
+      options.push("closed", "deleted")
+      if (currentStatus === "resolved") {
+        options.push("open")
+      }
+    }
+
+    return Array.from(new Set(options))
   }
 
   const handleAddComment = async () => {
@@ -137,7 +198,11 @@ export default function TicketDetailPage() {
   const statusColors: Record<string, string> = {
     open: "bg-blue-100 text-blue-700",
     closed: "bg-green-100 text-green-700",
+    "on-hold": "bg-yellow-100 text-yellow-700",
     hold: "bg-yellow-100 text-yellow-700",
+    resolved: "bg-purple-100 text-purple-700",
+    deleted: "bg-red-100 text-red-700",
+    returned: "bg-orange-100 text-orange-700",
   }
 
   if (loading) {
@@ -312,32 +377,38 @@ export default function TicketDetailPage() {
           <div className="space-y-6">
             {/* Status Actions */}
             <div className="bg-white dark:bg-gray-800 border border-border rounded-xl p-6">
-              <h3 className="font-poppins font-semibold text-foreground mb-4">Actions</h3>
+              <h3 className="font-poppins font-semibold text-foreground mb-4">Status Actions</h3>
               <div className="space-y-2">
-                <Button
-                  onClick={() => handleStatusChange("open")}
-                  variant="outline"
-                  className="w-full justify-start"
-                  disabled={ticket.status === "open"}
-                >
-                  Open
-                </Button>
-                <Button
-                  onClick={() => handleStatusChange("hold")}
-                  variant="outline"
-                  className="w-full justify-start dark:hover:bg-primary/20"
-                  disabled={ticket.status === "hold"}
-                >
-                  On Hold
-                </Button>
-                <Button
-                  onClick={() => handleStatusChange("closed")}
-                  variant="outline"
-                  className="w-full justify-start dark:hover:bg-primary/20"
-                  disabled={ticket.status === "closed"}
-                >
-                  Close
-                </Button>
+                {getAvailableStatusOptions().map((status) => {
+                  const statusLabels: Record<string, { label: string; icon: any }> = {
+                    open: { label: "Open", icon: PlayCircle },
+                    "on-hold": { label: "On Hold", icon: PauseCircle },
+                    resolved: { label: "Resolved", icon: CheckCircle2 },
+                    closed: { label: "Close", icon: XCircle },
+                    deleted: { label: "Delete", icon: Trash2 },
+                    returned: { label: "Returned", icon: RefreshCw },
+                  }
+                  const statusInfo = statusLabels[status] || { label: status, icon: null }
+                  const Icon = statusInfo.icon
+                  const isCurrentStatus = ticket.status === status
+
+                  return (
+                    <Button
+                      key={status}
+                      onClick={() => openStatusChangeModal(status)}
+                      variant="outline"
+                      className={`w-full justify-start ${
+                        status === "deleted" 
+                          ? "border-red-500 hover:border-red-600 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" 
+                          : "dark:hover:bg-primary/20"
+                      }`}
+                      disabled={isCurrentStatus || changingStatus}
+                    >
+                      {Icon && <Icon className="w-4 h-4 mr-2" />}
+                      {statusInfo.label}
+                    </Button>
+                  )
+                })}
                 {canRedirect && (
                   <Button
                     onClick={() => setIsRedirectModalOpen(true)}
@@ -534,9 +605,23 @@ export default function TicketDetailPage() {
         isOpen={isRedirectModalOpen}
         onClose={() => setIsRedirectModalOpen(false)}
         onConfirm={handleRedirect}
-        currentBusinessUnitGroupId={ticket?.business_unit_group_id || null}
-        currentBusinessUnitGroupName={ticket?.group_name || null}
+        currentBusinessUnitGroupId={ticket?.target_business_group_id || null}
+        currentBusinessUnitGroupName={ticket?.target_business_group_name || null}
         ticketTitle={ticket?.title || ""}
+      />
+
+      {/* Status Change Modal */}
+      <StatusChangeModal
+        isOpen={isStatusChangeModalOpen}
+        onClose={() => {
+          setIsStatusChangeModalOpen(false)
+          setSelectedNewStatus("")
+        }}
+        onConfirm={handleStatusChangeConfirm}
+        oldStatus={ticket?.status || ""}
+        newStatus={selectedNewStatus}
+        ticketNumber={ticket?.ticket_number || 0}
+        loading={changingStatus}
       />
     </DashboardLayout>
   )

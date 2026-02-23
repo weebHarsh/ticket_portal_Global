@@ -182,8 +182,24 @@ export async function loginUser(email: string, password: string) {
       },
     }
   } catch (error) {
-    // console.error("[LoginUser] Error:", error)
+    console.error("[LoginUser] Error:", error)
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
+    
+    // Provide more specific error messages for common database connection issues
+    if (errorMessage.includes("fetch failed") || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("ENOTFOUND")) {
+      return { 
+        success: false, 
+        error: "Database connection failed. Please check your database configuration or contact support." 
+      }
+    }
+    
+    if (errorMessage.includes("DATABASE_URL")) {
+      return { 
+        success: false, 
+        error: "Database configuration error. Please check your environment variables." 
+      }
+    }
+    
     return { success: false, error: `Failed to login: ${errorMessage}` }
   }
 }

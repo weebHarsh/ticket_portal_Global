@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { format } from "date-fns"
-import { Eye, Edit, Trash2, Download, Paperclip, FileDown, UserPlus, FileText, X, ChevronRight, ChevronDown } from "lucide-react"
+import { Eye, Edit, Download, Paperclip, FileDown, UserPlus, FileText, X, ChevronRight, ChevronDown, History } from "lucide-react"
 import {
   getTickets,
   getTicketById,
@@ -18,6 +18,8 @@ import { getMyTeamMembers } from "@/lib/actions/my-team"
 import * as XLSX from "xlsx"
 import AssigneeModal from "./assignee-modal"
 import ProjectModal from "./project-modal"
+import TicketHistoryTooltip from "./ticket-history-tooltip"
+import StatusChangeModal from "./status-change-modal"
 import { FolderKanban } from "lucide-react"
 
 interface Ticket {
@@ -42,6 +44,9 @@ interface Ticket {
   attachment_count: number
   business_unit_group_id: number
   group_name: string | null
+  target_business_group_name: string | null
+  assignee_group_name: string | null
+  initiator_group_name: string | null
   project_id: number | null
   project_name: string | null
   estimated_release_date: string | null
@@ -79,12 +84,16 @@ interface TicketsTableProps {
     userId?: number
     isInternal?: boolean
     targetBusinessGroup?: string
+    initiator?: string
+    initiatorGroup?: string
+    project?: string
     [key: string]: any
   }
   onExportReady?: (exportFn: () => void) => void
+  onTicketsChange?: (tickets: Ticket[]) => void
 }
 
-export default function TicketsTable({ filters, onExportReady }: TicketsTableProps) {
+export default function TicketsTable({ filters, onExportReady, onTicketsChange }: TicketsTableProps) {
   const router = useRouter()
   const { data: session, status: sessionStatus } = useSession()
   const [tickets, setTickets] = useState<Ticket[]>([])
@@ -101,6 +110,14 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
   // Modal state for project selection
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false)
   const [selectedTicketForProject, setSelectedTicketForProject] = useState<Ticket | null>(null)
+
+  // Activity history is now shown in tooltip, no modal state needed
+
+  // Modal state for status change
+  const [isStatusChangeModalOpen, setIsStatusChangeModalOpen] = useState(false)
+  const [selectedTicketForStatusChange, setSelectedTicketForStatusChange] = useState<Ticket | null>(null)
+  const [selectedNewStatus, setSelectedNewStatus] = useState<string>("")
+  const [changingStatus, setChangingStatus] = useState(false)
 
   // Attachments dropdown state
   const [attachmentsDropdownOpen, setAttachmentsDropdownOpen] = useState<number | null>(null)
@@ -247,8 +264,14 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
       }
 
       setTickets(ticketsData)
+      if (onTicketsChange) {
+        onTicketsChange(ticketsData)
+      }
     } else {
       setTickets([])
+      if (onTicketsChange) {
+        onTicketsChange([])
+      }
     }
     setIsLoading(false)
   }
@@ -282,21 +305,6 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
     }
   }
 
-  const handleDelete = async (ticketId: number) => {
-    if (
-      !confirm(
-        "Are you sure you want to delete this ticket? It will be marked as deleted but can be restored."
-      )
-    ) {
-      return
-    }
-    const result = await softDeleteTicket(ticketId)
-    if (result.success) {
-      loadTickets()
-    } else {
-      alert("Failed to delete ticket: " + (result.error || "Unknown error"))
-    }
-  }
 
   const handleAssigneeChange = async (ticketId: number, newAssigneeId: number | null) => {
     const result = await updateTicketAssignee(ticketId, newAssigneeId || 0)
@@ -366,7 +374,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
     return isAdmin || isInitiator || isAssignee || isSPOC
   }
 
-  // Get available status options based on user role
+  // Get available status options based on user role and current status
   const getAvailableStatusOptions = (ticket: Ticket): string[] => {
     if (!currentUser) return []
     if (ticket.is_deleted || ticket.status === "deleted") return []
@@ -376,46 +384,80 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
     const isInitiator = userId === ticket.created_by
     const isAssignee = userId === ticket.assigned_to
     const isSPOC = userId === ticket.spoc_user_id
+    const currentStatus = ticket.status
 
     const options: string[] = []
 
-    // Always include current status
-    if (ticket.status) {
-      options.push(ticket.status)
-    }
-
     if (isAdmin) {
-      // Admins can set any status except deleted (deleted is only for initiator)
-      return ["open", "on-hold", "resolved", "closed", "returned"]
+      // Admins can set any status
+      return ["open", "on-hold", "resolved", "closed", "returned", "deleted"]
     }
 
-    if (isAssignee || isSPOC) {
-      // Assignee/SPOC can: On-hold, Resolved, Returned
-      if (!options.includes("on-hold")) options.push("on-hold")
-      if (!options.includes("resolved")) options.push("resolved")
-      if (!options.includes("returned")) options.push("returned")
+    // SPOC: Can change to On-hold, Resolved, or Open (if currently On-hold/Resolved)
+    if (isSPOC) {
+      options.push("on-hold", "resolved")
+      if (currentStatus === "on-hold" || currentStatus === "resolved") {
+        options.push("open")
+      }
     }
 
+    // Assignee: Can change to Resolved or Open (if currently Resolved)
+    if (isAssignee) {
+      options.push("resolved")
+      if (currentStatus === "resolved") {
+        options.push("open")
+      }
+    }
+
+    // Initiator: Can change to Closed, Delete, or Open (if currently Resolved)
     if (isInitiator) {
-      // Initiator can: Closed, Deleted
-      if (!options.includes("closed")) options.push("closed")
-      if (!options.includes("deleted")) options.push("deleted")
+      options.push("closed", "deleted")
+      if (currentStatus === "resolved") {
+        options.push("open")
+      }
     }
 
-    return options
+    // Remove duplicates and ensure current status is included
+    const uniqueOptions = Array.from(new Set(options))
+    if (currentStatus && !uniqueOptions.includes(currentStatus)) {
+      uniqueOptions.unshift(currentStatus)
+    }
+
+    return uniqueOptions
   }
 
-  const handleStatusChange = async (ticketId: number, newStatus: string) => {
-    const result = await updateTicketStatus(ticketId, newStatus)
+  const openStatusChangeModal = (ticket: Ticket, newStatus: string) => {
+    setSelectedTicketForStatusChange(ticket)
+    setSelectedNewStatus(newStatus)
+    setIsStatusChangeModalOpen(true)
+  }
+
+  const handleStatusChangeConfirm = async (reason: string, remarks: string) => {
+    if (!selectedTicketForStatusChange) return
+
+    setChangingStatus(true)
+    const result = await updateTicketStatus(
+      selectedTicketForStatusChange.id,
+      selectedNewStatus,
+      reason,
+      remarks
+    )
+    setChangingStatus(false)
+
     if (result.success) {
-      // Update local state to reflect change without page refresh
-      const updatedStatus = newStatus as "open" | "on-hold" | "resolved" | "closed" | "returned" | "deleted"
-      setTickets(tickets.map(t =>
-        t.id === ticketId ? { ...t, status: updatedStatus } : t
-      ))
+      setIsStatusChangeModalOpen(false)
+      setSelectedTicketForStatusChange(null)
+      setSelectedNewStatus("")
+      // Reload tickets to get updated status
+      loadTickets()
     } else {
       alert("Failed to update status: " + (result.error || "Unknown error"))
     }
+  }
+
+  const handleDelete = async (ticket: Ticket) => {
+    // Open status change modal for delete
+    openStatusChangeModal(ticket, "deleted")
   }
 
   const toggleAttachmentsDropdown = async (ticketId: number) => {
@@ -450,7 +492,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
     const exportData = tickets.map((ticket) => ({
       "#": ticket.ticket_number,
       "Initiator": ticket.creator_name || "Unknown",
-      "Group": ticket.group_name || "No Group",
+      "Initiator Group": ticket.initiator_group_name || "No Group",
       "Date": format(new Date(ticket.created_at), "MMM dd, yyyy"),
       "Time": format(new Date(ticket.created_at), "hh:mm a"),
       "Type": ticket.ticket_type,
@@ -470,7 +512,6 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
       "Closed At": ticket.closed_at ? format(new Date(ticket.closed_at), "MMM dd, yyyy hh:mm a") : "-",
       "Hold By": ticket.hold_by_name || "-",
       "Hold At": ticket.hold_at ? format(new Date(ticket.hold_at), "MMM dd, yyyy hh:mm a") : "-",
-      "Files": ticket.attachment_count || 0,
     }))
 
     // Create workbook and worksheet
@@ -499,7 +540,6 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
       { wch: 20 }, // Closed At
       { wch: 20 }, // Hold By
       { wch: 20 }, // Hold At
-      { wch: 8 },  // Files
     ]
 
     XLSX.utils.book_append_sheet(wb, ws, "Tickets")
@@ -568,10 +608,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
               <th className="px-3 py-2.5 text-left text-xs font-semibold text-foreground whitespace-nowrap">
                 Status
               </th>
-              <th className="px-3 py-2.5 text-center text-xs font-semibold text-foreground whitespace-nowrap w-14">
-                Files
-              </th>
-              <th className="px-3 py-2.5 text-center text-xs font-semibold text-foreground whitespace-nowrap w-20">
+              <th className="px-3 py-2.5 text-center text-xs font-semibold text-foreground whitespace-nowrap w-24">
                 Actions
               </th>
             </tr>
@@ -619,7 +656,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                         onClick={() => router.push(`/tickets/${ticket.id}`)}
                       >
                         <div className="text-sm font-medium text-foreground">{ticket.creator_name || "Unknown"}</div>
-                        <div className="text-xs text-foreground-secondary">{ticket.group_name || "No Group"}</div>
+                        <div className="text-xs text-foreground-secondary">{ticket.initiator_group_name || "No Group"}</div>
                       </td>
 
                 {/* Date - Compact format */}
@@ -712,7 +749,10 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
 
                 {/* SPOC */}
                 <td className="px-3 py-2.5 whitespace-nowrap">
-                  <span className="text-sm text-foreground">{ticket.spoc_name || "-"}</span>
+                  <div className="text-sm text-foreground">{ticket.spoc_name || "-"}</div>
+                  {ticket.target_business_group_name && (
+                    <div className="text-xs text-foreground-secondary">{ticket.target_business_group_name}</div>
+                  )}
                 </td>
 
                 {/* Target Business Group (Internal Tickets Only) */}
@@ -725,13 +765,18 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                 {/* Assignee */}
                 <td className="px-3 py-2.5 whitespace-nowrap">
                   {ticket.assignee_name ? (
-                    <span
-                      className={`text-sm font-medium text-foreground ${canEditAssignee(ticket) ? "cursor-pointer hover:text-primary" : ""}`}
-                      onClick={() => canEditAssignee(ticket) && openAssigneeModal(ticket)}
-                    >
-                      {ticket.assignee_name}
-                      {canEditAssignee(ticket) && <Edit className="w-3 h-3 inline ml-1 opacity-50" />}
-                    </span>
+                    <div>
+                      <span
+                        className={`text-sm font-medium text-foreground ${canEditAssignee(ticket) ? "cursor-pointer hover:text-primary" : ""}`}
+                        onClick={() => canEditAssignee(ticket) && openAssigneeModal(ticket)}
+                      >
+                        {ticket.assignee_name}
+                        {canEditAssignee(ticket) && <Edit className="w-3 h-3 inline ml-1 opacity-50" />}
+                      </span>
+                      {ticket.assignee_group_name && (
+                        <div className="text-xs text-foreground-secondary">{ticket.assignee_group_name}</div>
+                      )}
+                    </div>
                   ) : canEditAssignee(ticket) ? (
                     <button
                       onClick={() => openAssigneeModal(ticket)}
@@ -750,96 +795,100 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                   {canEditStatus(ticket) ? (
                     <select
                       value={ticket.status}
-                      onChange={(e) => handleStatusChange(ticket.id, e.target.value)}
+                      onChange={(e) => {
+                        const newStatus = e.target.value
+                        if (newStatus !== ticket.status) {
+                          openStatusChangeModal(ticket, newStatus)
+                        }
+                      }}
                       className={`px-2 py-1 rounded text-xs font-medium border focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer ${statusColor[ticket.status] || statusColor["open"]}`}
                     >
                       {getAvailableStatusOptions(ticket).map((status) => (
                         <option key={status} value={status}>
-                          {status === "on-hold" ? "On-Hold" : status.charAt(0).toUpperCase() + status.slice(1)}
+                          {status === "on-hold" ? "On-Hold" : status === "deleted" ? "Delete" : status.charAt(0).toUpperCase() + status.slice(1)}
                         </option>
                       ))}
                     </select>
                   ) : (
                     <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${statusColor[ticket.status] || statusColor["open"]}`}>
-                      {ticket.status === "on-hold" ? "On-Hold" : ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
+                      {ticket.status === "on-hold" ? "On-Hold" : ticket.status === "deleted" ? "Deleted" : ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
                     </span>
-                  )}
-                </td>
-
-                {/* Attachments */}
-                <td className="px-3 py-2.5 text-center relative">
-                  {ticket.attachment_count > 0 ? (
-                    <div className="relative inline-block" ref={attachmentsDropdownOpen === ticket.id ? dropdownRef : null}>
-                      <button
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 transition-colors"
-                        onClick={() => toggleAttachmentsDropdown(ticket.id)}
-                        title={`Download ${ticket.attachment_count} attachment(s)`}
-                      >
-                        <Download className="w-3 h-3" />
-                        <span className="text-xs font-medium">{ticket.attachment_count}</span>
-                      </button>
-
-                      {/* Attachments Dropdown */}
-                      {attachmentsDropdownOpen === ticket.id && (
-                        <div className="absolute right-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-50">
-                          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-surface/50 dark:bg-gray-700/50">
-                            <span className="text-xs font-semibold text-foreground">Attachments</span>
-                            <button
-                              onClick={() => setAttachmentsDropdownOpen(null)}
-                              className="p-0.5 hover:bg-surface dark:hover:bg-gray-700 rounded"
-                            >
-                              <X className="w-3.5 h-3.5 text-muted-foreground" />
-                            </button>
-                          </div>
-                          <div className="max-h-48 overflow-y-auto">
-                            {loadingAttachments ? (
-                              <div className="p-3 text-center text-sm text-muted-foreground">
-                                Loading...
-                              </div>
-                            ) : attachmentsList.length > 0 ? (
-                              attachmentsList.map((attachment: any) => (
-                                <a
-                                  key={attachment.id}
-                                  href={attachment.file_url}
-                                  download={attachment.file_name}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-2 px-3 py-2 hover:bg-surface dark:hover:bg-gray-700 transition-colors border-b border-border last:border-b-0"
-                                >
-                                  <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-foreground truncate">{attachment.file_name}</p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {attachment.file_size ? `${(attachment.file_size / 1024).toFixed(1)} KB` : ""}
-                                    </p>
-                                  </div>
-                                  <Download className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                                </a>
-                              ))
-                            ) : (
-                              <div className="p-3 text-center text-sm text-muted-foreground">
-                                No attachments found
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-foreground-secondary">-</span>
                   )}
                 </td>
 
                 {/* Actions */}
                 <td className="px-3 py-2.5">
-                  <div className="flex items-center justify-center gap-0.5">
-                    <button
-                      className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
-                      title="View"
-                      onClick={() => router.push(`/tickets/${ticket.id}`)}
-                    >
-                      <Eye className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
-                    </button>
+                  <div className="flex items-center justify-center gap-1">
+                    {/* Files/Attachments */}
+                    {ticket.attachment_count > 0 ? (
+                      <div className="relative inline-block" ref={attachmentsDropdownOpen === ticket.id ? dropdownRef : null}>
+                        <button
+                          className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
+                          onClick={() => toggleAttachmentsDropdown(ticket.id)}
+                          title={`${ticket.attachment_count} attachment(s)`}
+                        >
+                          <Paperclip className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
+                        </button>
+
+                        {/* Attachments Dropdown */}
+                        {attachmentsDropdownOpen === ticket.id && (
+                          <div className="absolute right-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-border rounded-lg shadow-lg z-50">
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-surface/50 dark:bg-gray-700/50">
+                              <span className="text-xs font-semibold text-foreground">Attachments</span>
+                              <button
+                                onClick={() => setAttachmentsDropdownOpen(null)}
+                                className="p-0.5 hover:bg-surface dark:hover:bg-gray-700 rounded"
+                              >
+                                <X className="w-3.5 h-3.5 text-muted-foreground" />
+                              </button>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto">
+                              {loadingAttachments ? (
+                                <div className="p-3 text-center text-sm text-muted-foreground">
+                                  Loading...
+                                </div>
+                              ) : attachmentsList.length > 0 ? (
+                                attachmentsList.map((attachment: any) => (
+                                  <a
+                                    key={attachment.id}
+                                    href={attachment.file_url}
+                                    download={attachment.file_name}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 px-3 py-2 hover:bg-surface dark:hover:bg-gray-700 transition-colors border-b border-border last:border-b-0"
+                                  >
+                                    <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm text-foreground truncate">{attachment.file_name}</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {attachment.file_size ? `${(attachment.file_size / 1024).toFixed(1)} KB` : ""}
+                                      </p>
+                                    </div>
+                                    <Download className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                                  </a>
+                                ))
+                              ) : (
+                                <div className="p-3 text-center text-sm text-muted-foreground">
+                                  No attachments found
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    
+                    {/* Activity History - Tooltip on Hover */}
+                    <TicketHistoryTooltip ticketId={ticket.id} ticketNumber={ticket.ticket_number}>
+                      <button
+                        className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
+                        title="Activity History (Hover to view)"
+                      >
+                        <History className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
+                      </button>
+                    </TicketHistoryTooltip>
+                    
+                    {/* Edit */}
                     <button
                       className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
                       title="Edit"
@@ -847,17 +896,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                     >
                       <Edit className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
                     </button>
-                    {!ticket.is_deleted && 
-                     currentUser && 
-                     (ticket.created_by === currentUser.id || currentUser.role?.toLowerCase() === "admin") && (
-                      <button
-                        className="p-1.5 hover:bg-red-50 rounded transition-colors group"
-                        title={currentUser.role?.toLowerCase() === "admin" ? "Delete (Admin)" : "Delete (Only initiator can delete)"}
-                        onClick={() => handleDelete(ticket.id)}
-                      >
-                        <Trash2 className="w-4 h-4 text-red-400 group-hover:text-red-600" />
-                      </button>
-                    )}
+                    
                   </div>
                 </td>
               </tr>
@@ -884,7 +923,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                           <div className="w-4 h-4 border-l-2 border-b-2 border-foreground-secondary/30"></div>
                           <div>
                             <div className="text-sm font-medium text-foreground">{childTicket.creator_name || "Unknown"}</div>
-                            <div className="text-xs text-foreground-secondary">{childTicket.group_name || "No Group"}</div>
+                            <div className="text-xs text-foreground-secondary">{childTicket.initiator_group_name || "No Group"}</div>
                           </div>
                         </div>
                       </td>
@@ -952,7 +991,10 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
 
                       {/* SPOC */}
                       <td className="px-3 py-2.5 whitespace-nowrap">
-                        <span className="text-sm text-foreground">{childTicket.spoc_name || "-"}</span>
+                        <div className="text-sm text-foreground">{childTicket.spoc_name || "-"}</div>
+                        {childTicket.target_business_group_name && (
+                          <div className="text-xs text-foreground-secondary">{childTicket.target_business_group_name}</div>
+                        )}
                       </td>
 
                       {/* Target Business Group (Internal Tickets Only) */}
@@ -965,18 +1007,28 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                       {/* Assignee */}
                       <td className="px-3 py-2.5 whitespace-nowrap">
                         {canEditAssignee(childTicket) ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openAssigneeModal(childTicket)
-                            }}
-                            className="text-sm text-foreground hover:text-primary flex items-center gap-1"
-                          >
-                            {childTicket.assignee_name || "Unassigned"}
-                            <UserPlus className="w-3 h-3" />
-                          </button>
+                          <div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openAssigneeModal(childTicket)
+                              }}
+                              className="text-sm text-foreground hover:text-primary flex items-center gap-1"
+                            >
+                              {childTicket.assignee_name || "Unassigned"}
+                              <UserPlus className="w-3 h-3" />
+                            </button>
+                            {childTicket.assignee_group_name && (
+                              <div className="text-xs text-foreground-secondary">{childTicket.assignee_group_name}</div>
+                            )}
+                          </div>
                         ) : (
-                          <span className="text-sm text-foreground">{childTicket.assignee_name || "Unassigned"}</span>
+                          <div>
+                            <span className="text-sm text-foreground">{childTicket.assignee_name || "Unassigned"}</span>
+                            {childTicket.assignee_group_name && (
+                              <div className="text-xs text-foreground-secondary">{childTicket.assignee_group_name}</div>
+                            )}
+                          </div>
                         )}
                       </td>
 
@@ -985,7 +1037,12 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                         {canEditStatus(childTicket) ? (
                           <select
                             value={childTicket.status}
-                            onChange={(e) => handleStatusChange(childTicket.id, e.target.value as Ticket["status"])}
+                            onChange={(e) => {
+                              const newStatus = e.target.value
+                              if (newStatus !== childTicket.status) {
+                                openStatusChangeModal(childTicket, newStatus)
+                              }
+                            }}
                             onClick={(e) => e.stopPropagation()}
                             className={`text-xs font-medium px-2 py-1 rounded border-0 focus:ring-2 focus:ring-primary ${
                               statusColor[childTicket.status] || "bg-gray-100 text-gray-700"
@@ -993,48 +1050,46 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                           >
                             {getAvailableStatusOptions(childTicket).map((status) => (
                               <option key={status} value={status}>
-                                {status.charAt(0).toUpperCase() + status.slice(1).replace("-", " ")}
+                                {status === "on-hold" ? "On-Hold" : status === "deleted" ? "Delete" : status.charAt(0).toUpperCase() + status.slice(1).replace("-", " ")}
                               </option>
                             ))}
                           </select>
                         ) : (
                           <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor[childTicket.status] || "bg-gray-100 text-gray-700"}`}>
-                            {childTicket.status.charAt(0).toUpperCase() + childTicket.status.slice(1).replace("-", " ")}
+                            {childTicket.status === "on-hold" ? "On-Hold" : childTicket.status === "deleted" ? "Deleted" : childTicket.status.charAt(0).toUpperCase() + childTicket.status.slice(1).replace("-", " ")}
                           </span>
-                        )}
-                      </td>
-
-                      {/* Files */}
-                      <td className="px-3 py-2.5 text-center">
-                        {childTicket.attachment_count > 0 ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleAttachmentsDropdown(childTicket.id)
-                            }}
-                            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                          >
-                            <Paperclip className="w-3 h-3" />
-                            {childTicket.attachment_count}
-                          </button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
                         )}
                       </td>
 
                       {/* Actions */}
                       <td className="px-3 py-2.5">
-                        <div className="flex items-center justify-center gap-0.5">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              router.push(`/tickets/${childTicket.id}`)
-                            }}
-                            className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
-                            title="View"
-                          >
-                            <Eye className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
-                          </button>
+                        <div className="flex items-center justify-center gap-1">
+                          {/* Files/Attachments */}
+                          {childTicket.attachment_count > 0 ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleAttachmentsDropdown(childTicket.id)
+                              }}
+                              className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
+                              title={`${childTicket.attachment_count} attachment(s)`}
+                            >
+                              <Paperclip className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
+                            </button>
+                          ) : null}
+                          
+                          {/* Activity History - Tooltip on Hover */}
+                          <TicketHistoryTooltip ticketId={childTicket.id} ticketNumber={childTicket.ticket_number}>
+                            <button
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-1.5 hover:bg-primary/10 rounded transition-colors group"
+                              title="Activity History (Hover to view)"
+                            >
+                              <History className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
+                            </button>
+                          </TicketHistoryTooltip>
+                          
+                          {/* Edit */}
                           {canEditTicket(childTicket) && (
                             <button
                               onClick={(e) => {
@@ -1047,20 +1102,7 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
                               <Edit className="w-4 h-4 text-foreground-secondary group-hover:text-primary" />
                             </button>
                           )}
-                          {!childTicket.is_deleted && 
-                           currentUser && 
-                           (childTicket.created_by === currentUser.id || currentUser.role?.toLowerCase() === "admin") && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDelete(childTicket.id)
-                              }}
-                              className="p-1.5 hover:bg-red-50 rounded transition-colors group"
-                              title={currentUser.role?.toLowerCase() === "admin" ? "Delete (Admin)" : "Delete (Only initiator can delete)"}
-                            >
-                              <Trash2 className="w-4 h-4 text-red-400 group-hover:text-red-600" />
-                            </button>
-                          )}
+                          
                         </div>
                       </td>
                     </tr>
@@ -1103,6 +1145,23 @@ export default function TicketsTable({ filters, onExportReady }: TicketsTablePro
         onSelect={handleProjectSelect}
         currentProjectId={selectedTicketForProject?.project_id || null}
         ticketTitle={selectedTicketForProject?.title || ""}
+      />
+
+      {/* Activity History is now shown in tooltip, no modal needed */}
+
+      {/* Status Change Modal */}
+      <StatusChangeModal
+        isOpen={isStatusChangeModalOpen}
+        onClose={() => {
+          setIsStatusChangeModalOpen(false)
+          setSelectedTicketForStatusChange(null)
+          setSelectedNewStatus("")
+        }}
+        onConfirm={handleStatusChangeConfirm}
+        oldStatus={selectedTicketForStatusChange?.status || ""}
+        newStatus={selectedNewStatus}
+        ticketNumber={selectedTicketForStatusChange?.ticket_number || 0}
+        loading={changingStatus}
       />
     </div>
   )
