@@ -9,10 +9,58 @@ const databaseUrl = getDatabaseUrl()
 // For timeout issues, we'll add retry logic via a wrapper
 const neonClient = neon(databaseUrl)
 
+// Helper function to check if an error is retryable
+function isRetryableError(error: unknown): boolean {
+  if (!error) return false
+  
+  const errorMessage = error instanceof Error ? error.message : String(error)
+  const errorCode = (error as any)?.code
+  const cause = (error as any)?.cause
+  
+  // Check direct error properties
+  if (
+    errorCode === 'ETIMEDOUT' ||
+    errorMessage.includes('ETIMEDOUT') ||
+    errorMessage.includes('fetch failed') ||
+    errorMessage.includes('ECONNREFUSED') ||
+    errorMessage.includes('ENOTFOUND') ||
+    errorMessage.includes('timeout') ||
+    errorMessage.includes('network') ||
+    errorMessage.includes('connection')
+  ) {
+    return true
+  }
+  
+  // Check nested cause
+  if (cause) {
+    const causeCode = cause?.code
+    const causeMessage = cause instanceof Error ? cause.message : String(cause)
+    if (
+      causeCode === 'ETIMEDOUT' ||
+      causeMessage?.includes('ETIMEDOUT') ||
+      causeMessage?.includes('fetch failed') ||
+      causeMessage?.includes('timeout')
+    ) {
+      return true
+    }
+    
+    // Check for AggregateError with ETIMEDOUT
+    if (cause?.errors && Array.isArray(cause.errors)) {
+      for (const err of cause.errors) {
+        if (err?.code === 'ETIMEDOUT' || err?.message?.includes('ETIMEDOUT')) {
+          return true
+        }
+      }
+    }
+  }
+  
+  return false
+}
+
 // Wrapper function to add retry logic for transient failures
 async function withRetry<T>(
   operation: () => Promise<T>,
-  maxRetries: number = 3,
+  maxRetries: number = 5,
   delayMs: number = 1000
 ): Promise<T> {
   let lastError: Error | unknown
@@ -23,25 +71,25 @@ async function withRetry<T>(
     } catch (error) {
       lastError = error
       
-      // Check if it's a timeout or network error that we should retry
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      const errorCode = (error as any)?.code
-      const isRetryable = 
-        errorCode === 'ETIMEDOUT' ||
-        errorMessage.includes('ETIMEDOUT') ||
-        errorMessage.includes('fetch failed') ||
-        errorMessage.includes('ECONNREFUSED') ||
-        errorMessage.includes('ENOTFOUND') ||
-        errorMessage.includes('timeout') ||
-        (error as any)?.cause?.code === 'ETIMEDOUT'
+      // Check if it's a retryable error
+      const isRetryable = isRetryableError(error)
       
       if (!isRetryable || attempt === maxRetries) {
+        // Log final error with more details
+        if (attempt === maxRetries && isRetryable) {
+          console.error(`[DB Retry] All ${maxRetries} attempts failed. Final error:`, error)
+        }
         throw error
       }
       
-      // Exponential backoff: 1s, 2s, 4s
-      const waitTime = delayMs * Math.pow(2, attempt - 1)
-      console.warn(`[DB Retry] Attempt ${attempt}/${maxRetries} failed (${errorMessage}). Retrying in ${waitTime}ms...`)
+      // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s
+      const baseWaitTime = delayMs * Math.pow(2, attempt - 1)
+      const jitter = Math.random() * 500 // Add up to 500ms jitter
+      const waitTime = baseWaitTime + jitter
+      
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.warn(`[DB Retry] Attempt ${attempt}/${maxRetries} failed (${errorMessage}). Retrying in ${Math.round(waitTime)}ms...`)
+      
       await new Promise(resolve => setTimeout(resolve, waitTime))
     }
   }

@@ -189,7 +189,33 @@ export async function getTickets(filters?: {
     return { success: true, data: filteredTickets }
   } catch (error) {
     console.error("[v0] Error fetching tickets:", error)
-    return { success: false, error: "Failed to fetch tickets" }
+    
+    // Provide more specific error messages
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const errorCode = (error as any)?.code
+    const cause = (error as any)?.cause
+    
+    let userMessage = "Failed to fetch tickets"
+    
+    // Check for timeout/network errors
+    if (
+      errorCode === 'ETIMEDOUT' ||
+      errorMessage.includes('ETIMEDOUT') ||
+      errorMessage.includes('fetch failed') ||
+      errorMessage.includes('timeout') ||
+      cause?.code === 'ETIMEDOUT' ||
+      (cause?.errors && cause.errors.some((e: any) => e?.code === 'ETIMEDOUT'))
+    ) {
+      userMessage = "Database connection timed out. Please try again in a moment. If the problem persists, check your network connection or contact support."
+    } else if (
+      errorMessage.includes('ECONNREFUSED') ||
+      errorMessage.includes('ENOTFOUND') ||
+      errorMessage.includes('connection')
+    ) {
+      userMessage = "Unable to connect to the database. Please check your network connection or contact support."
+    }
+    
+    return { success: false, error: userMessage }
   }
 }
 
